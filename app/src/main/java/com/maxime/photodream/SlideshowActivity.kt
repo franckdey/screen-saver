@@ -11,7 +11,7 @@ import android.view.WindowManager
 
 /**
  * Le même diaporama, lancé à la main depuis l'appli.
- * OK ou un appui sur l'écran fixe la photo / relance, flèche droite = suivante, Retour pour quitter.
+ * OK ou un appui sur l'écran fixe la photo / relance, flèche droite = suivante, flèche gauche = précédente, Retour pour quitter.
  */
 class SlideshowActivity : Activity() {
     private var slideshow: SlideshowView? = null
@@ -57,6 +57,10 @@ class SlideshowActivity : Activity() {
             }
             KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_NEXT -> {
                 slideshow?.skip()
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                slideshow?.previous()
                 return true
             }
         }

@@ -84,6 +84,15 @@ class SlideshowView(context: Context) : View(context) {
     /** Vrai une fois la liste des photos du NAS lue : avant, rien à charger. */
     private var listed = false
 
+    /** Photos déjà agrandies, pour revenir en arrière avec la flèche gauche. */
+    private val history = PhotoHistory()
+    /** Position dans l'historique de la photo en cours de chargement ou prête, -1 pour une nouvelle. */
+    private var nextIndex = -1
+    /** Nouvelle photo déjà chargée mise de côté pendant qu'on revoit les précédentes. */
+    private var stashed: LoadedPhoto? = null
+    /** Change à chaque chargement lancé : un chargement dépassé ne remplace pas le nouveau. */
+    private var loadGen = 0
+
     private var status: String? = "Lecture du dossier réseau… (un gros dossier peut prendre un moment)"
     private var notice: String? = null
     private var noticeUntil = 0L
@@ -167,6 +176,16 @@ class SlideshowView(context: Context) : View(context) {
         // au lieu d'annoncer une erreur.
         if (!listed || loadingNext || next != null) return
         val s = scope ?: return
+        // après un retour en arrière, on rejoue la suite avant de montrer de nouvelles photos
+        history.replayIndex()?.let { loadFromHistory(it); return }
+        stashed?.let {
+            stashed = null
+            next = it
+            nextIndex = -1
+            return
+        }
+        val gen = ++loadGen
+        nextIndex = -1
         loadingNext = true
         // De préférence une vignette visible, pas encore montrée : c'est exactement
         // cette photo-là qui grandira.
@@ -176,6 +195,11 @@ class SlideshowView(context: Context) : View(context) {
             val photo = target?.photo?.let { repo.loadPhoto(it, blurLevel) } ?: run {
                 nextTarget = null
                 repo.nextPhoto(blurLevel)
+            }
+            if (gen != loadGen) {
+                // la flèche gauche est passée entre-temps : on garde cette photo pour plus tard
+                if (photo != null && stashed == null) stashed = photo
+                return@launch
             }
             next = photo
             loadingNext = false
@@ -196,6 +220,43 @@ class SlideshowView(context: Context) : View(context) {
 
     /** Passe tout de suite à la photo suivante. */
     fun skip() = timeline.skip()
+
+    /** Revient à la photo précédente ; chaque appui remonte d'une photo de plus. */
+    fun previous() {
+        if (!listed) return
+        val pending = nextIndex.takeIf { it >= 0 && (next != null || loadingNext) }
+        // sans photo à l'écran, la « précédente » est celle qui vient de repartir
+        val base = pending ?: if (current != null) history.shown else history.shown + 1
+        val target = base - 1
+        if (target < 0 || target >= history.size) {
+            showNotice("Pas de photo plus ancienne", 2_500)
+            return
+        }
+        // une nouvelle photo déjà prête n'est pas perdue : elle passera après
+        if (next != null && nextIndex < 0 && stashed == null) stashed = next
+        next = null
+        loadFromHistory(target)
+        timeline.skip()
+    }
+
+    private fun loadFromHistory(index: Int) {
+        val s = scope ?: return
+        val gen = ++loadGen
+        val photo = history[index]
+        nextIndex = index
+        nextTarget = null
+        loadingNext = true
+        s.launch {
+            val loaded = repo.loadPhoto(photo, blurLevel)
+            if (gen != loadGen) return@launch
+            next = loaded
+            loadingNext = false
+            if (loaded == null) {
+                nextIndex = -1
+                showNotice("Impossible de recharger cette photo : " + (repo.lastError ?: "raison inconnue"), 5_000)
+            }
+        }
+    }
 
     private fun showNotice(text: String, durationMs: Long) {
         notice = text
@@ -349,6 +410,8 @@ class SlideshowView(context: Context) : View(context) {
                     }
                     current = ready
                     currentTile = tile
+                    if (photo != null) history.show(photo, nextIndex)
+                    nextIndex = -1
                     nextTarget = null
                     next = null
                     requestNext() // on prépare déjà la suivante pendant l'affichage
