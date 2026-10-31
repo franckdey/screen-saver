@@ -54,6 +54,7 @@ class PhotoRepositoryTest {
         prefs.address = "smb://nas/photo"
         cacheDir.deleteRecursively()
         File(context.filesDir, "liste-photos.txt").delete()
+        File(context.filesDir, "photos-vues.txt").delete()
     }
 
     @After
@@ -115,6 +116,24 @@ class PhotoRepositoryTest {
         val r = repo(FakeSource(files))
         r.load()
         repeat(4) { assertNotNull(r.nextPhoto(0)) }
+    }
+
+    @Test
+    fun `apres une relance, les photos deja montrees ne reviennent pas`() = runTest {
+        val source = FakeSource(photos(3))
+        val first = repo(source)
+        first.load()
+        val shown = (1..2).map { first.nextPhoto(0)!!; source.reads.keys.last() }.toSet()
+
+        val second = repo(source)
+        second.load()
+        second.nextPhoto(0)
+        val third = source.reads.keys.single { it !in shown }
+        assertEquals(1, source.reads[third])
+        assertEquals(3, source.reads.size)
+
+        // tout est passé : un nouveau tour recommence au lieu de s'arrêter
+        assertNotNull(second.nextPhoto(0))
     }
 
     @Test
