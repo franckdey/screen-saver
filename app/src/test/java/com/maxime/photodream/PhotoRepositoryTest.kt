@@ -23,12 +23,14 @@ class PhotoRepositoryTest {
 
     /** Un faux NAS en mémoire, qui compte les téléchargements. */
     private class FakeSource(
-        val files: Map<String, ByteArray>,
+        var files: Map<String, ByteArray>,
         var failListing: Exception? = null,
     ) : PhotoSource {
         val reads = mutableMapOf<String, Int>()
+        var listings = 0
 
         override suspend fun listPhotos(recursive: Boolean, limit: Int): List<RemotePhoto> {
+            listings++
             failListing?.let { throw it }
             return files.keys.map { RemotePhoto(it, files.getValue(it).size.toLong(), 1L) }
         }
@@ -49,7 +51,9 @@ class PhotoRepositoryTest {
     @Before
     fun setUp() {
         prefs = Prefs(context)
+        prefs.address = "smb://nas/photo"
         cacheDir.deleteRecursively()
+        File(context.filesDir, "liste-photos.txt").delete()
     }
 
     @After
@@ -111,6 +115,43 @@ class PhotoRepositoryTest {
         val r = repo(FakeSource(files))
         r.load()
         repeat(4) { assertNotNull(r.nextPhoto(0)) }
+    }
+
+    @Test
+    fun `liste memorisee reprise sans relire le NAS`() = runTest {
+        val source = FakeSource(photos(5))
+        assertEquals(5, repo(source).load())
+        assertEquals(1, source.listings)
+
+        val r = repo(source)
+        assertEquals(5, r.load(useSaved = true))
+        assertTrue(r.usedSavedListing)
+        assertEquals(1, source.listings)
+        assertNotNull(r.nextPhoto(0))
+    }
+
+    @Test
+    fun `mise a jour en arriere-plan prend les nouvelles photos`() = runTest {
+        val source = FakeSource(photos(2))
+        repo(source).load()
+        val r = repo(source)
+        r.load(useSaved = true)
+        source.files = photos(2) + ("Vacances\\nouvelle.jpg" to TestImages.jpeg(640, 480))
+        assertTrue(r.refresh())
+        repeat(3) { assertNotNull(r.nextPhoto(0)) }
+        assertEquals(1, source.reads["Vacances\\nouvelle.jpg"])
+        assertFalse(r.refresh()) // rien de neuf
+    }
+
+    @Test
+    fun `autre dossier, la liste memorisee est ignoree`() = runTest {
+        val source = FakeSource(photos(3))
+        repo(source).load()
+        prefs.address = "smb://nas/autre"
+        val r = repo(source)
+        r.load(useSaved = true)
+        assertFalse(r.usedSavedListing)
+        assertEquals(2, source.listings)
     }
 
     @Test

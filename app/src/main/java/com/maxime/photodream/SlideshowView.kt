@@ -131,7 +131,7 @@ class SlideshowView(context: Context) : View(context) {
     }
 
     private suspend fun start() {
-        val count = repo.load()
+        val count = repo.load(useSaved = true)
         if (count == 0) {
             status = repo.lastError ?: "Aucune photo trouvée"
             return
@@ -143,6 +143,8 @@ class SlideshowView(context: Context) : View(context) {
         }
         scope?.launch { fillMosaic() }
         requestNext()
+        // démarré sur la liste mémorisée : on la remet à jour sans interrompre le diaporama
+        if (repo.usedSavedListing) scope?.launch { repo.refresh() }
     }
 
     private suspend fun fillMosaic() {
