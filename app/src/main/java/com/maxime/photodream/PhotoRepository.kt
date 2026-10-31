@@ -26,7 +26,13 @@ class PhotoRepository(
     private val listingFile = File(context.filesDir, "liste-photos.txt")
     private var source: PhotoSource? = null
     @Volatile private var photos: List<RemotePhoto> = emptyList()
+    /** Ordre des photos en grand : celles pas encore montrées d'abord. */
     private val queue = ArrayDeque<RemotePhoto>()
+    /** Ordre des vignettes de la mosaïque, indépendant. */
+    private val tileQueue = ArrayDeque<RemotePhoto>()
+    /** Photos déjà montrées en grand, gardées d'un lancement à l'autre. */
+    private val seenFile = File(context.filesDir, "photos-vues.txt")
+    private var seen: MutableSet<String>? = null
     private var downloadsSinceTrim = 0
 
     /** Dernière erreur rencontrée, en clair. */
@@ -81,7 +87,10 @@ class PhotoRepository(
                 .map { RemotePhoto(CACHE_PREFIX + it.name, it.length(), 0L) }
             offline = photos.isNotEmpty()
         }
-        queue.clear()
+        synchronized(this) {
+            queue.clear()
+            tileQueue.clear()
+        }
         photos.size
     }
 
@@ -117,7 +126,8 @@ class PhotoRepository(
         val known = kept.toHashSet()
         queue.clear()
         queue.addAll(kept)
-        queue.addAll(list.filter { it !in known }.shuffled())
+        queue.addAll(list.filter { it !in known && it.path !in seenSet() }.shuffled())
+        tileQueue.retainAll(present)
     }
 
     /** Clé du dossier réglé : une autre adresse ou un autre choix de sous-dossiers invalide la liste. */
@@ -165,6 +175,7 @@ class PhotoRepository(
                 return@repeat
             }
             val label = if (photo.path.startsWith(CACHE_PREFIX)) "" else source?.folderLabel(photo).orEmpty()
+            markSeen(photo)
             return@withContext LoadedPhoto(full, Images.makeTile(full, blurLevel), label)
         }
         null
@@ -173,7 +184,7 @@ class PhotoRepository(
     /** Vignette (floutée selon le réglage) d'une photo au hasard, pour la mosaïque. */
     suspend fun nextTile(blurLevel: Int): Bitmap? = withContext(Dispatchers.IO) {
         repeat(MAX_ATTEMPTS) {
-            val photo = nextRemote() ?: return@withContext null
+            val photo = nextTileRemote() ?: return@withContext null
             val file = localFile(photo) ?: return@repeat
             val small = Images.decode(file, 480, Bitmap.Config.RGB_565) ?: return@repeat
             val tile = Images.makeTile(small, blurLevel)
@@ -183,11 +194,54 @@ class PhotoRepository(
         null
     }
 
+    /**
+     * Prochaine photo à montrer en grand : d'abord celles jamais montrées (même lors des
+     * lancements précédents). Quand tout est passé, on oublie et on recommence un tour.
+     */
     @Synchronized
     private fun nextRemote(): RemotePhoto? {
         if (photos.isEmpty()) return null
-        if (queue.isEmpty()) queue.addAll(photos.shuffled())
+        if (queue.isEmpty()) {
+            val seenNow = seenSet()
+            var fresh = photos.filter { it.path !in seenNow }
+            if (fresh.isEmpty()) {
+                resetSeen()
+                fresh = photos
+            }
+            queue.addAll(fresh.shuffled())
+        }
         return queue.removeFirst()
+    }
+
+    @Synchronized
+    private fun nextTileRemote(): RemotePhoto? {
+        if (photos.isEmpty()) return null
+        if (tileQueue.isEmpty()) tileQueue.addAll(photos.shuffled())
+        return tileQueue.removeFirst()
+    }
+
+    @Synchronized
+    private fun seenSet(): MutableSet<String> = seen ?: try {
+        if (seenFile.exists()) seenFile.readLines().filterTo(HashSet()) { it.isNotEmpty() } else HashSet()
+    } catch (e: Exception) {
+        HashSet()
+    }.also { seen = it }
+
+    @Synchronized
+    private fun markSeen(photo: RemotePhoto) {
+        if (seenSet().add(photo.path)) {
+            try {
+                seenFile.appendText(photo.path + "\n")
+            } catch (e: Exception) {
+                // pas grave : la photo pourra revenir au prochain lancement
+            }
+        }
+    }
+
+    @Synchronized
+    private fun resetSeen() {
+        seen = HashSet()
+        seenFile.delete()
     }
 
     private suspend fun localFile(photo: RemotePhoto): File? {
@@ -243,6 +297,7 @@ class PhotoRepository(
     fun clearCache() {
         cacheDir.listFiles()?.forEach { it.delete() }
         listingFile.delete()
+        resetSeen()
     }
 
     override fun close() {
