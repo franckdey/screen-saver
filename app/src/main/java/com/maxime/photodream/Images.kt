@@ -3,12 +3,16 @@ package com.maxime.photodream
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
 import android.media.ExifInterface
+import android.os.Build
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.nio.ByteBuffer
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -28,7 +32,11 @@ object Images {
     fun downscaleToJpeg(bytes: ByteArray, out: File): Boolean {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            // Format que BitmapFactory ne lit pas (certains HEIC…) : ImageDecoder, Android 9+.
+            val bmp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) decodeModern(bytes) else null
+            return bmp != null && writeJpeg(bmp, out)
+        }
 
         val rotation = exifRotation(bytes)
         val rotatedW = if (rotation % 180 == 0) bounds.outWidth else bounds.outHeight
@@ -48,11 +56,29 @@ object Images {
         val result = if (matrix.isIdentity) decoded
         else Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
 
+        if (result !== decoded) decoded.recycle()
+        return writeJpeg(result, out)
+    }
+
+    private fun writeJpeg(bmp: Bitmap, out: File): Boolean {
         val tmp = File(out.parentFile, out.name + ".tmp")
-        val ok = tmp.outputStream().use { result.compress(Bitmap.CompressFormat.JPEG, 90, it) }
-        if (result !== decoded) result.recycle()
-        decoded.recycle()
+        val ok = tmp.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+        bmp.recycle()
         return ok && tmp.renameTo(out)
+    }
+
+    /** Décodage par ImageDecoder (remet aussi la photo à l'endroit), réduit au plein écran. */
+    @android.annotation.TargetApi(Build.VERSION_CODES.P)
+    private fun decodeModern(bytes: ByteArray): Bitmap? = try {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+            val w = info.size.width
+            val h = info.size.height
+            val scale = min(MAX_W.toFloat() / max(w, h), MAX_H.toFloat() / min(w, h)).coerceAtMost(1f)
+            decoder.setTargetSize(max(1, (w * scale).roundToInt()), max(1, (h * scale).roundToInt()))
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+        }
+    } catch (e: Exception) {
+        null
     }
 
     /** Décode un fichier du cache en limitant sa largeur à environ [maxWidth]. */

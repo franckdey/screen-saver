@@ -161,7 +161,7 @@ class SlideshowView(context: Context) : View(context) {
             next = photo
             loadingNext = false
             if (photo == null && current == null) {
-                showNotice(repo.lastError ?: "Impossible de charger les photos", 8_000)
+                showNotice("Impossible de charger les photos : " + (repo.lastError ?: "raison inconnue"), 12_000)
             }
         }
     }

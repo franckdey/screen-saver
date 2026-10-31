@@ -114,6 +114,22 @@ class PhotoRepositoryTest {
     }
 
     @Test
+    fun `format illisible explique avec le nom du fichier`() = runTest {
+        val r = repo(FakeSource(mapOf("Vacances\\IMG_0001.xyz.jpg" to "pas une photo".toByteArray())))
+        r.load()
+        assertNull(r.nextPhoto(0))
+        assertEquals("Format de photo non reconnu par l'appareil : IMG_0001.xyz.jpg", r.lastError)
+    }
+
+    @Test
+    fun `fichier vide explique`() = runTest {
+        val r = repo(FakeSource(mapOf("Vacances\\vide.jpg" to ByteArray(0))))
+        r.load()
+        assertNull(r.nextPhoto(0))
+        assertEquals("Fichier vide : vide.jpg", r.lastError)
+    }
+
+    @Test
     fun `NAS injoignable, les photos deja vues restent disponibles`() = runTest {
         repo(FakeSource(photos(3))).apply {
             load()

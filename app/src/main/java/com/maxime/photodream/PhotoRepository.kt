@@ -72,7 +72,11 @@ class PhotoRepository(
         repeat(MAX_ATTEMPTS) {
             val photo = nextRemote() ?: return@withContext null
             val file = localFile(photo) ?: return@repeat
-            val full = Images.decode(file, 1920) ?: return@repeat
+            val full = Images.decode(file, 1920) ?: run {
+                lastError = "Photo en cache illisible : ${name(photo)}"
+                file.delete()
+                return@repeat
+            }
             val label = if (photo.path.startsWith(CACHE_PREFIX)) "" else source?.folderLabel(photo).orEmpty()
             return@withContext LoadedPhoto(full, Images.makeTile(full, blurLevel), label)
         }
@@ -111,7 +115,14 @@ class PhotoRepository(
         val src = source ?: return null
         return try {
             val bytes = src.read(photo.path)
-            if (!Images.downscaleToJpeg(bytes, file)) return null
+            if (bytes.isEmpty()) {
+                lastError = "Fichier vide : ${name(photo)}"
+                return null
+            }
+            if (!Images.downscaleToJpeg(bytes, file)) {
+                lastError = "Format de photo non reconnu par l'appareil : ${name(photo)}"
+                return null
+            }
             if (++downloadsSinceTrim >= 20) {
                 downloadsSinceTrim = 0
                 trimCache(keep = file)
@@ -123,7 +134,8 @@ class PhotoRepository(
             lastError = SmbPhotoSource.describe(e)
             null
         } catch (e: OutOfMemoryError) {
-            null // photo gigantesque : on passe à la suivante
+            lastError = "Photo trop grande pour la mémoire de l'appareil : ${name(photo)}"
+            null // on passe à la suivante
         }
     }
 
@@ -149,6 +161,8 @@ class PhotoRepository(
         source?.close()
         source = null
     }
+
+    private fun name(photo: RemotePhoto) = photo.path.substringAfterLast('\\')
 
     private fun key(photo: RemotePhoto): String {
         val digest = MessageDigest.getInstance("SHA-1")
