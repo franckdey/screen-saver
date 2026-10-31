@@ -8,6 +8,9 @@ interface PhotoSource : Closeable {
 
     suspend fun read(path: String): ByteArray
 
+    /** Début du fichier seulement (pour lire l'EXIF sans tout télécharger). */
+    suspend fun readHead(path: String, maxBytes: Int): ByteArray = read(path)
+
     /** Nom du dossier de la photo, tel qu'on l'affiche sous la photo. */
     fun folderLabel(photo: RemotePhoto): String
 }
