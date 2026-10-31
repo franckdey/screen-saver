@@ -168,10 +168,14 @@ class PhotoRepository(
     suspend fun nextPhoto(blurLevel: Int): LoadedPhoto? = withContext(Dispatchers.IO) {
         repeat(MAX_ATTEMPTS) {
             val photo = nextRemote() ?: return@withContext null
-            val file = localFile(photo) ?: return@repeat
+            val file = localFile(photo) ?: run {
+                markSeen(photo) // illisible : on la saute pour ce tour au lieu de la redemander
+                return@repeat
+            }
             val full = Images.decode(file, 1920) ?: run {
                 lastError = "Photo en cache illisible : ${name(photo)}"
                 file.delete()
+                markSeen(photo)
                 return@repeat
             }
             val label = if (photo.path.startsWith(CACHE_PREFIX)) "" else source?.folderLabel(photo).orEmpty()
