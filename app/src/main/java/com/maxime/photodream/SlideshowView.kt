@@ -76,8 +76,10 @@ class SlideshowView(context: Context) : View(context) {
     private var currentTile: Tile? = null
     private var next: LoadedPhoto? = null
     private var loadingNext = false
+    /** Vrai une fois la liste des photos du NAS lue : avant, rien à charger. */
+    private var listed = false
 
-    private var status: String? = "Connexion au dossier réseau…"
+    private var status: String? = "Lecture du dossier réseau… (un gros dossier peut prendre un moment)"
     private var notice: String? = null
     private var noticeUntil = 0L
     private var labelSize = 0f
@@ -135,6 +137,7 @@ class SlideshowView(context: Context) : View(context) {
             return
         }
         status = null
+        listed = true
         if (repo.offline) {
             showNotice("NAS injoignable, photos déjà en cache (${repo.lastError})", 10_000)
         }
@@ -153,7 +156,9 @@ class SlideshowView(context: Context) : View(context) {
     }
 
     private fun requestNext() {
-        if (loadingNext || next != null) return
+        // Un gros dossier peut mettre longtemps à être parcouru : on attend la liste
+        // au lieu d'annoncer une erreur.
+        if (!listed || loadingNext || next != null) return
         val s = scope ?: return
         loadingNext = true
         s.launch {
@@ -281,7 +286,7 @@ class SlideshowView(context: Context) : View(context) {
     }
 
     private fun updatePhase(now: Long) {
-        for (event in timeline.update(now, nextReady = next != null, loading = loadingNext)) {
+        for (event in timeline.update(now, nextReady = next != null, loading = loadingNext || !listed)) {
             when (event) {
                 Timeline.Event.START_PHOTO -> {
                     val ready = next ?: continue
