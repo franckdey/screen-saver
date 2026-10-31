@@ -82,6 +82,19 @@ class SmbIntegrationTest {
     }
 
     @Test
+    fun `lit une grosse photo par blocs sans rien perdre`() = runTest {
+        // 6 Mo, comme une photo d'appareil : bien plus que les blocs de lecture de 64 Ko
+        val big = ByteArray(6 * 1024 * 1024 + 123) { (it * 31 % 251).toByte() }
+        SMBClient().use { client ->
+            client.connect(host).use { conn ->
+                val session = conn.authenticate(AuthenticationContext(user, password.toCharArray(), null))
+                (session.connectShare(share) as DiskShare).use { write(it, "Vacances\\grande.jpg", big) }
+            }
+        }
+        source().use { src -> assertArrayEquals(big, src.read("Vacances\\grande.jpg")) }
+    }
+
+    @Test
     fun `mauvais mot de passe explique clairement`() = runTest {
         source(pass = "faux").use { src ->
             val error = runCatching { src.listPhotos(true) }.exceptionOrNull()!!

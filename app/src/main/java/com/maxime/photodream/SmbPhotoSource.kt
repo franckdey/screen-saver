@@ -55,6 +55,9 @@ class SmbPhotoSource(
         SmbConfig.builder()
             .withTimeout(20, TimeUnit.SECONDS)
             .withSoTimeout(60, TimeUnit.SECONDS)
+            // Lectures par blocs de 64 Ko (un seul « crédit » SMB) : certains NAS et box
+            // répondent mal aux grosses lectures négociées, et le téléchargement reste bloqué.
+            .withReadBufferSize(64 * 1024)
             .build()
     )
     private var connection: Connection? = null
