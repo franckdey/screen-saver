@@ -14,6 +14,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -37,6 +38,7 @@ class SettingsActivity : Activity() {
     private lateinit var showFolder: CheckBox
     private lateinit var showClock: CheckBox
     private lateinit var status: TextView
+    private lateinit var preview: ImageView
     private lateinit var updateButton: Button
     private val updater = Updater(BuildConfig.UPDATE_BASE_URL, BuildConfig.VERSION_CODE)
     private var available: UpdateInfo? = null
@@ -98,6 +100,7 @@ class SettingsActivity : Activity() {
             startActivity(Intent(this, SlideshowActivity::class.java))
         })
         buttons.addView(button("Choisir comme économiseur") { openDreamSettings() })
+        buttons.addView(button("Tester une photo") { testOnePhoto() })
         buttons.addView(button("Vider le cache") {
             PhotoRepository(this, prefs).clearCache()
             status.text = "Cache vidé."
@@ -107,6 +110,12 @@ class SettingsActivity : Activity() {
 
         status = text("", 16f).apply { setPadding(0, dp(16), 0, 0) }
         root.addView(status)
+        preview = ImageView(this).apply {
+            adjustViewBounds = true
+            visibility = View.GONE
+            setPadding(0, dp(12), 0, 0)
+        }
+        root.addView(preview, LinearLayout.LayoutParams(dp(480), LinearLayout.LayoutParams.WRAP_CONTENT))
 
         setContentView(ScrollView(this).apply {
             setBackgroundColor(Color.rgb(18, 24, 32))
@@ -148,6 +157,23 @@ class SettingsActivity : Activity() {
                 else -> "OK : $count photos trouvées."
             }
             Thread { repo.close() }.start()
+        }
+    }
+
+    /** Charge une seule photo en affichant chaque étape, pour trouver ce qui bloque. */
+    private fun testOnePhoto() {
+        save()
+        preview.visibility = View.GONE
+        status.text = "Test d'une photo…"
+        scope.launch {
+            val result = PhotoDiagnostic(prefs, File(cacheDir, "diagnostic")).run { report ->
+                runOnUiThread { status.text = report }
+            }
+            status.text = result.report
+            result.bitmap?.let {
+                preview.setImageBitmap(it)
+                preview.visibility = View.VISIBLE
+            }
         }
     }
 
