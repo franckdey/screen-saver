@@ -9,8 +9,11 @@ import java.io.Closeable
 import java.io.File
 import java.security.MessageDigest
 
-/** Une photo prête à être affichée en grand. */
-class LoadedPhoto(val full: Bitmap, val tile: Bitmap, val label: String)
+/** Une photo prête à être affichée en grand ; [photo] dit de quel fichier elle vient. */
+class LoadedPhoto(val full: Bitmap, val tile: Bitmap, val label: String, val photo: RemotePhoto? = null)
+
+/** Vignette de la mosaïque et la photo dont elle vient (pour l'agrandir ensuite). */
+class TileImage(val bitmap: Bitmap, val photo: RemotePhoto)
 
 /**
  * Liste les photos du partage, les télécharge et les garde en cache (réduites à la taille
@@ -168,32 +171,46 @@ class PhotoRepository(
     suspend fun nextPhoto(blurLevel: Int): LoadedPhoto? = withContext(Dispatchers.IO) {
         repeat(MAX_ATTEMPTS) {
             val photo = nextRemote() ?: return@withContext null
-            val file = localFile(photo) ?: run {
-                markSeen(photo) // illisible : on la saute pour ce tour au lieu de la redemander
-                return@repeat
-            }
-            val full = Images.decode(file, 1920) ?: run {
-                lastError = "Photo en cache illisible : ${name(photo)}"
-                file.delete()
-                markSeen(photo)
-                return@repeat
-            }
-            val label = if (photo.path.startsWith(CACHE_PREFIX)) "" else source?.folderLabel(photo).orEmpty()
-            markSeen(photo)
-            return@withContext LoadedPhoto(full, Images.makeTile(full, blurLevel), label)
+            load(photo, blurLevel)?.let { return@withContext it }
         }
         null
     }
 
-    /** Vignette (floutée selon le réglage) d'une photo au hasard, pour la mosaïque. */
-    suspend fun nextTile(blurLevel: Int): Bitmap? = withContext(Dispatchers.IO) {
+    /** Charge en grand une photo précise, par exemple celle d'une vignette visible. */
+    suspend fun loadPhoto(photo: RemotePhoto, blurLevel: Int): LoadedPhoto? =
+        withContext(Dispatchers.IO) { load(photo, blurLevel) }
+
+    private suspend fun load(photo: RemotePhoto, blurLevel: Int): LoadedPhoto? {
+        val file = localFile(photo) ?: run {
+            markSeen(photo) // illisible : on la saute pour ce tour au lieu de la redemander
+            return null
+        }
+        val full = Images.decode(file, 1920) ?: run {
+            lastError = "Photo en cache illisible : ${name(photo)}"
+            file.delete()
+            markSeen(photo)
+            return null
+        }
+        val label = if (photo.path.startsWith(CACHE_PREFIX)) "" else source?.folderLabel(photo).orEmpty()
+        markSeen(photo)
+        return LoadedPhoto(full, Images.makeTile(full, blurLevel), label, photo)
+    }
+
+    /** Vrai si la photo a déjà été montrée en grand pendant ce tour. */
+    fun isSeen(photo: RemotePhoto): Boolean = synchronized(this) { photo.path in seenSet() }
+
+    /**
+     * Vignette (floutée selon le réglage) pour la mosaïque. Elle est prise parmi les photos
+     * pas encore montrées : ce sont les candidates à l'agrandissement.
+     */
+    suspend fun nextTile(blurLevel: Int): TileImage? = withContext(Dispatchers.IO) {
         repeat(MAX_ATTEMPTS) {
             val photo = nextTileRemote() ?: return@withContext null
             val file = localFile(photo) ?: return@repeat
             val small = Images.decode(file, 480, Bitmap.Config.RGB_565) ?: return@repeat
             val tile = Images.makeTile(small, blurLevel)
             small.recycle()
-            return@withContext tile
+            return@withContext TileImage(tile, photo)
         }
         null
     }
@@ -220,7 +237,12 @@ class PhotoRepository(
     @Synchronized
     private fun nextTileRemote(): RemotePhoto? {
         if (photos.isEmpty()) return null
-        if (tileQueue.isEmpty()) tileQueue.addAll(photos.shuffled())
+        if (tileQueue.isEmpty()) {
+            val seenNow = seenSet()
+            val (fresh, old) = photos.partition { it.path !in seenNow }
+            tileQueue.addAll(fresh.shuffled())
+            tileQueue.addAll(old.shuffled())
+        }
         return tileQueue.removeFirst()
     }
 
