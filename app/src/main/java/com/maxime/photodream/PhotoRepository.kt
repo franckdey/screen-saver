@@ -35,6 +35,8 @@ class PhotoRepository(
     private val tileQueue = ArrayDeque<RemotePhoto>()
     /** Photos déjà montrées en grand, gardées d'un lancement à l'autre. */
     private val seenFile = File(context.filesDir, "photos-vues.txt")
+    /** Noms de lieux déjà trouvés à partir du GPS des photos. */
+    private val places = PlaceNames(File(context.filesDir, "lieux.txt"))
     private var seen: MutableSet<String>? = null
     private var downloadsSinceTrim = 0
 
@@ -191,7 +193,7 @@ class PhotoRepository(
             markSeen(photo)
             return null
         }
-        val label = if (photo.path.startsWith(CACHE_PREFIX)) "" else source?.folderLabel(photo).orEmpty()
+        val label = caption(photo, file)
         markSeen(photo)
         return LoadedPhoto(full, Images.makeTile(full, blurLevel), label, photo)
     }
@@ -290,6 +292,8 @@ class PhotoRepository(
                 lastError = "Format de photo non reconnu par l'appareil : ${name(photo)}"
                 return null
             }
+            // la copie réduite perd l'EXIF : on garde à côté le GPS et la date
+            writeMeta(file, PhotoMeta.fromExif(bytes))
             if (++downloadsSinceTrim >= 20) {
                 downloadsSinceTrim = 0
                 trimCache(keep = file)
@@ -331,6 +335,45 @@ class PhotoRepository(
         source = null
     }
 
+    /**
+     * Texte affiché sur la photo : lieu (d'après le GPS) et date, ou le nom de la photo à défaut.
+     * Pour une photo déjà en cache sans ces infos, on relit juste le début du fichier.
+     */
+    private suspend fun caption(photo: RemotePhoto, file: File): String {
+        if (!prefs.showFolder) return ""
+        val offline = photo.path.startsWith(CACHE_PREFIX)
+        val fileName = if (offline) "" else name(photo).substringBeforeLast('.')
+        var meta = readMeta(file)
+        if (meta == null && !offline) {
+            meta = try {
+                source?.readHead(photo.path, EXIF_HEAD)?.let { PhotoMeta.fromExif(it) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            meta?.let { writeMeta(file, it) }
+        }
+        val place = meta?.let { m -> if (m.lat != null && m.lon != null) places.name(m.lat, m.lon) else null }
+        return Captions.format(place, meta?.taken, fileName)
+    }
+
+    private fun metaFile(file: File) = File(file.path.removeSuffix(".jpg") + ".meta")
+
+    private fun readMeta(file: File): PhotoMeta? = try {
+        metaFile(file).takeIf { it.exists() }?.readText()?.let(PhotoMeta::parse)
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun writeMeta(file: File, meta: PhotoMeta) {
+        try {
+            metaFile(file).writeText(meta.serialize())
+        } catch (e: Exception) {
+            // pas grave : on retrouvera l'info plus tard
+        }
+    }
+
     private fun name(photo: RemotePhoto) = photo.path.substringAfterLast('\\')
 
     private fun key(photo: RemotePhoto): String {
@@ -352,5 +395,7 @@ class PhotoRepository(
 
         private const val CACHE_PREFIX = "cache:"
         private const val MAX_ATTEMPTS = 8
+        /** L'EXIF est au début du fichier : 256 Ko suffisent largement. */
+        private const val EXIF_HEAD = 256 * 1024
     }
 }

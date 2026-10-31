@@ -148,6 +148,25 @@ class SmbPhotoSource(
 
     override suspend fun read(path: String): ByteArray = read(path) {}
 
+    override suspend fun readHead(path: String, maxBytes: Int): ByteArray = withShare { disk ->
+        disk.openFile(
+            path, EnumSet.of(AccessMask.GENERIC_READ), null, SMB2ShareAccess.ALL,
+            SMB2CreateDisposition.FILE_OPEN, null,
+        ).use { file ->
+            // jamais au-delà de la fin du fichier (la Freebox ne répond pas dans ce cas)
+            val size = file.fileInformation.standardInformation.endOfFile
+            val wanted = minOf(size, maxBytes.toLong()).toInt()
+            val out = ByteArray(wanted)
+            var offset = 0
+            while (offset < wanted) {
+                val n = file.read(out, offset.toLong(), offset, minOf(READ_CHUNK, wanted - offset))
+                if (n <= 0) break
+                offset += n
+            }
+            if (offset == wanted) out else out.copyOf(offset)
+        }
+    }
+
     /**
      * Lit un fichier par blocs, une requête à la fois (pas de lecture anticipée, que certains
      * serveurs gèrent mal). [onProgress] reçoit le nombre d'octets déjà reçus.

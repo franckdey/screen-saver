@@ -74,7 +74,7 @@ class SettingsActivity : Activity() {
         domain = field(root, "Domaine / groupe de travail (généralement vide)", prefs.domain)
 
         recursive = check(root, "Inclure les sous-dossiers", prefs.recursive)
-        showFolder = check(root, "Afficher le nom du dossier sous la photo", prefs.showFolder)
+        showFolder = check(root, "Afficher le lieu et la date sur la photo (sinon son nom)", prefs.showFolder)
         showClock = check(root, "Afficher l'heure", prefs.showClock)
 
         root.addView(cycler("Durée en plein écran", listOf(5, 8, 12, 20, 30), prefs.holdSeconds, { "$it s" }) {
