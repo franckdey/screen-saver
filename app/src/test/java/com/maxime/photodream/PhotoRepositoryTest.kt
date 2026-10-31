@@ -235,6 +235,10 @@ class PhotoRepositoryTest {
         val r = repo(FakeSource(photos(2)))
         r.load()
         val tile = r.nextTile(1)!!
-        assertEquals(320 to 240, tile.width to tile.height)
+        assertEquals(320 to 240, tile.bitmap.width to tile.bitmap.height)
+        // la vignette sait de quelle photo elle vient : on peut agrandir exactement celle-là
+        val big = r.loadPhoto(tile.photo, 1)!!
+        assertEquals(tile.photo, big.photo)
+        assertTrue(r.isSeen(tile.photo))
     }
 }

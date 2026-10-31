@@ -50,18 +50,21 @@ class SlideshowView(context: Context) : View(context) {
         var rotation = 0f
         var spin = 0f
         var bitmap: Bitmap? = null
+        /** Photo dont vient la vignette : c'est elle qu'on agrandit. */
+        var photo: RemotePhoto? = null
         var previous: Bitmap? = null
         var shownAt = 0L
 
-        fun show(bmp: Bitmap, now: Long) {
+        fun show(bmp: Bitmap, now: Long, from: RemotePhoto?) {
             previous = bitmap
             bitmap = bmp
+            photo = from
             shownAt = now
         }
     }
 
     private val tiles = ArrayList<Tile>()
-    private val pool = ArrayList<Bitmap>()
+    private val pool = ArrayList<TileImage>()
     private val recentTiles = ArrayDeque<Tile>()
     private var baseH = 0f
     private var gap = 0f
@@ -74,6 +77,8 @@ class SlideshowView(context: Context) : View(context) {
     private val timeline = Timeline(holdMs)
     private var current: LoadedPhoto? = null
     private var currentTile: Tile? = null
+    /** Vignette visible dont la photo est en cours de chargement pour être agrandie. */
+    private var nextTarget: Tile? = null
     private var next: LoadedPhoto? = null
     private var loadingNext = false
     /** Vrai une fois la liste des photos du NAS lue : avant, rien à charger. */
@@ -151,9 +156,9 @@ class SlideshowView(context: Context) : View(context) {
         while (tiles.isEmpty()) delay(50)
         for (tile in tiles.shuffled()) {
             if (tile.bitmap != null) continue
-            val bmp = repo.nextTile(blurLevel) ?: break
-            if (tile.bitmap == null) tile.show(bmp, SystemClock.uptimeMillis())
-            addToPool(bmp)
+            val img = repo.nextTile(blurLevel) ?: break
+            if (tile.bitmap == null) tile.show(img.bitmap, SystemClock.uptimeMillis(), img.photo)
+            addToPool(img)
         }
     }
 
@@ -163,8 +168,15 @@ class SlideshowView(context: Context) : View(context) {
         if (!listed || loadingNext || next != null) return
         val s = scope ?: return
         loadingNext = true
+        // De préférence une vignette visible, pas encore montrée : c'est exactement
+        // cette photo-là qui grandira.
+        val target = candidateTile()
+        nextTarget = target
         s.launch {
-            val photo = repo.nextPhoto(blurLevel)
+            val photo = target?.photo?.let { repo.loadPhoto(it, blurLevel) } ?: run {
+                nextTarget = null
+                repo.nextPhoto(blurLevel)
+            }
             next = photo
             loadingNext = false
             if (photo == null && current == null) {
@@ -190,8 +202,32 @@ class SlideshowView(context: Context) : View(context) {
         noticeUntil = SystemClock.uptimeMillis() + durationMs
     }
 
-    private fun addToPool(bmp: Bitmap) {
-        pool += bmp
+    /** Grande vignette bien visible vers le centre, dont la photo n'a pas encore été montrée. */
+    private fun candidateTile(): Tile? {
+        fun central(t: Tile) = t.x >= width * 0.15f && t.x + t.w <= width * 0.85f &&
+            t.y >= height * 0.12f && t.y + t.h <= height * 0.88f
+        return tiles.filter { t ->
+            val photo = t.photo
+            t !== currentTile && t !in recentTiles && photo != null && central(t) && !repo.isSeen(photo)
+        }.sortedByDescending { it.scale }.take(4).randomOrNull()
+    }
+
+    private fun fullyVisible(t: Tile) = t.x >= 0 && t.x + t.w <= width && t.y >= 0 && t.y + t.h <= height
+
+    /** Après chaque photo, une vignette reçoit une photo pas encore vue : la mosaïque se renouvelle. */
+    private fun refreshOneTile() {
+        val s = scope ?: return
+        s.launch {
+            val img = repo.nextTile(blurLevel) ?: return@launch
+            addToPool(img)
+            val choice = tiles.filter { it !== currentTile && it !== nextTarget && it.bitmap != null }
+                .randomOrNull() ?: return@launch
+            choice.show(img.bitmap, SystemClock.uptimeMillis(), img.photo)
+        }
+    }
+
+    private fun addToPool(img: TileImage) {
+        pool += img
         while (pool.size > MAX_POOL) pool.removeAt(0)
     }
 
@@ -205,7 +241,7 @@ class SlideshowView(context: Context) : View(context) {
         speed = short / 1080f * 16f // pixels par seconde
 
         // grille « secouée » : couvre l'écran avec des espaces irréguliers
-        val oldBitmaps = tiles.mapNotNull { it.bitmap }
+        val oldBitmaps = tiles.mapNotNull { t -> t.bitmap?.let { it to t.photo } }
         tiles.clear()
         val cellW = baseH * Images.TILE_ASPECT * 1.05f
         val cellH = baseH * 1.05f
@@ -228,7 +264,13 @@ class SlideshowView(context: Context) : View(context) {
             y += cellH
         }
         tiles.sortBy { it.scale } // les petites derrière
-        oldBitmaps.forEachIndexed { i, bmp -> if (i < tiles.size) tiles[i].bitmap = bmp }
+        oldBitmaps.forEachIndexed { i, (bmp, photo) ->
+            if (i < tiles.size) {
+                tiles[i].bitmap = bmp
+                tiles[i].photo = photo
+            }
+        }
+        nextTarget = null
         recentTiles.clear()
         if (current != null) currentTile = tiles.last()
         textPaint.textSize = short * 0.035f
@@ -256,13 +298,13 @@ class SlideshowView(context: Context) : View(context) {
             if (t.y > height + gap) { t.y = -t.h - gap; wrapped = true }
             else if (t.y + t.h < -gap) { t.y = height + gap; wrapped = true }
             // sortie d'un côté, retour de l'autre : on lui donne une autre photo
-            if (wrapped && t !== currentTile && t.bitmap != null) {
-                val candidates = pool.filter { it !in onScreen }
+            if (wrapped && t !== currentTile && t !== nextTarget && t.bitmap != null) {
+                val candidates = pool.filter { it.bitmap !in onScreen }
                 if (candidates.isNotEmpty()) {
-                    val bmp = candidates[random.nextInt(candidates.size)]
-                    t.show(bmp, now)
+                    val img = candidates[random.nextInt(candidates.size)]
+                    t.show(img.bitmap, now, img.photo)
                     t.previous = null
-                    onScreen += bmp
+                    onScreen += img.bitmap
                 }
             }
         }
@@ -292,13 +334,25 @@ class SlideshowView(context: Context) : View(context) {
             when (event) {
                 Timeline.Event.START_PHOTO -> {
                     val ready = next ?: continue
-                    val tile = pickTile()
-                    tile.show(ready.tile, now)
-                    addToPool(ready.tile)
+                    val photo = ready.photo
+                    // la vignette qui montre déjà cette photo, si elle est bien visible
+                    val shown = nextTarget?.takeIf { it.photo == photo && fullyVisible(it) }
+                        ?: tiles.firstOrNull { photo != null && it.photo == photo && fullyVisible(it) }
+                    val tile = shown ?: pickTile().also {
+                        // aucune vignette ne la montre : on la pose sur une vignette avant d'agrandir
+                        it.show(ready.tile, now, photo)
+                        if (photo != null) addToPool(TileImage(ready.tile, photo))
+                    }
+                    if (shown != null) {
+                        recentTiles.addLast(shown)
+                        while (recentTiles.size > 4) recentTiles.removeFirst()
+                    }
                     current = ready
                     currentTile = tile
+                    nextTarget = null
                     next = null
                     requestNext() // on prépare déjà la suivante pendant l'affichage
+                    refreshOneTile()
                 }
                 Timeline.Event.PHOTO_DONE -> {
                     current = null
