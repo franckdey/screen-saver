@@ -16,7 +16,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.Closeable
 import java.io.IOException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
@@ -49,7 +48,8 @@ class SmbPhotoSource(
     private val user: String,
     private val password: String,
     private val domain: String,
-) : Closeable {
+    private val sdkInt: Int = android.os.Build.VERSION.SDK_INT,
+) : PhotoSource {
 
     private val client = SMBClient(
         SmbConfig.builder()
@@ -96,7 +96,7 @@ class SmbPhotoSource(
         }
     }
 
-    suspend fun listPhotos(recursive: Boolean, limit: Int = 50_000): List<RemotePhoto> = withShare { disk ->
+    override suspend fun listPhotos(recursive: Boolean, limit: Int): List<RemotePhoto> = withShare { disk ->
         val out = ArrayList<RemotePhoto>()
         fun walk(dir: String, depth: Int) {
             for (info in disk.list(dir)) {
@@ -110,7 +110,7 @@ class SmbPhotoSource(
                 val isDir = info.fileAttributes and FileAttributes.FILE_ATTRIBUTE_DIRECTORY.value != 0L
                 if (isDir) {
                     if (recursive && depth < 15) walk(path, depth + 1)
-                } else if (isImage(name)) {
+                } else if (isImage(name, sdkInt)) {
                     out += RemotePhoto(path, info.endOfFile, info.lastWriteTime.toEpochMillis())
                 }
             }
@@ -119,7 +119,7 @@ class SmbPhotoSource(
         out
     }
 
-    suspend fun read(path: String): ByteArray = withShare { disk ->
+    override suspend fun read(path: String): ByteArray = withShare { disk ->
         disk.openFile(
             path,
             EnumSet.of(AccessMask.GENERIC_READ),
@@ -131,13 +131,7 @@ class SmbPhotoSource(
     }
 
     /** Nom du dossier de la photo, relatif au dossier choisi (« 2019 Corse › Plage »). */
-    fun folderLabel(photo: RemotePhoto): String {
-        var dir = photo.path.substringBeforeLast('\\', "")
-        if (location.folder.isNotEmpty()) {
-            dir = dir.removePrefix(location.folder).trimStart('\\')
-        }
-        return dir.replace("\\", " › ")
-    }
+    override fun folderLabel(photo: RemotePhoto): String = folderLabel(location.folder, photo.path)
 
     private fun closeQuietly() {
         runCatching { share?.close() }
@@ -156,10 +150,20 @@ class SmbPhotoSource(
     companion object {
         private val EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "bmp", "heic", "heif")
 
-        fun isImage(name: String): Boolean {
+        /** HEIC n'est lisible qu'à partir d'Android 9 (API 28). */
+        fun isImage(name: String, sdkInt: Int = android.os.Build.VERSION.SDK_INT): Boolean {
             val ext = name.substringAfterLast('.', "").lowercase()
-            if (ext == "heic" || ext == "heif") return android.os.Build.VERSION.SDK_INT >= 28
+            if (ext == "heic" || ext == "heif") return sdkInt >= 28
             return ext in EXTENSIONS
+        }
+
+        /** Dossier d'une photo relatif au dossier choisi : « 2019 Corse › Plage ». */
+        fun folderLabel(rootFolder: String, path: String): String {
+            var dir = path.substringBeforeLast('\\', "")
+            if (rootFolder.isNotEmpty()) {
+                dir = dir.removePrefix(rootFolder).trimStart('\\')
+            }
+            return dir.replace("\\", " › ")
         }
 
         /** Traduit une erreur technique en message compréhensible. */

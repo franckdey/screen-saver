@@ -56,12 +56,26 @@ android {
         }
     }
 
+    testOptions {
+        unitTests {
+            // Robolectric : vrai Android (Bitmap, EXIF, préférences) sur la JVM, sans appareil
+            isIncludeAndroidResources = true
+            // hors Robolectric, les appels Android renvoient des valeurs neutres au lieu de planter
+            isReturnDefaultValues = true
+        }
+    }
+
     lint {
-        abortOnError = false
+        abortOnError = true
+        checkDependencies = false
     }
 }
 
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.hierynomus:smbj:0.14.0")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }

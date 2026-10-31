@@ -1,0 +1,55 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  tests:
+    # nom à cocher dans la protection de la branche main
+    name: Tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      - name: Démarrer un serveur Samba de test
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q samba
+          sudo mkdir -p /srv/photos && sudo chmod 777 /srv/photos
+          sudo useradd -M test
+          printf '[global]\n   server role = standalone server\n   map to guest = never\n   server min protocol = SMB2\n[photos]\n   path = /srv/photos\n   read only = no\n   valid users = test\n' | sudo tee /etc/samba/smb.conf
+          printf 'secret\nsecret\n' | sudo smbpasswd -s -a test
+          sudo systemctl restart smbd
+          for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/445) 2>/dev/null && break; sleep 1; done
+
+      - name: Tests unitaires, Robolectric et Samba
+        env:
+          SMB_TEST_HOST: 127.0.0.1
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Analyse du code (lint)
+        run: ./gradlew lintDebug --no-daemon
+
+      - name: Compilation de l'APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Rapports en cas d'échec
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: rapports
+          path: |
+            app/build/reports/
+            app/build/test-results/

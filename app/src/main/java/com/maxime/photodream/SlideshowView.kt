@@ -71,17 +71,11 @@ class SlideshowView(context: Context) : View(context) {
 
     // --- Photo au premier plan ------------------------------------------------------------
 
-    private enum class Phase { WAIT, FADE_IN, ZOOM_IN, HOLD, ZOOM_OUT, FADE_OUT }
-
-    private var phase = Phase.WAIT
-    private var phaseStart = 0L
+    private val timeline = Timeline(holdMs)
     private var current: LoadedPhoto? = null
     private var currentTile: Tile? = null
     private var next: LoadedPhoto? = null
     private var loadingNext = false
-    private var paused = false
-    private var pausedAt = 0L
-    private var skipRequested = false
 
     private var status: String? = "Connexion au dossier réseau…"
     private var notice: String? = null
@@ -174,19 +168,15 @@ class SlideshowView(context: Context) : View(context) {
 
     /** Fixe la photo affichée (ou la prochaine) en plein écran, ou relance le défilement. */
     fun togglePause() {
-        paused = !paused
-        pausedAt = SystemClock.uptimeMillis()
+        timeline.togglePause(SystemClock.uptimeMillis())
         showNotice(
-            if (paused) "Photo fixée pendant 1 minute (OK pour reprendre avant)" else "Reprise du défilement",
+            if (timeline.paused) "Photo fixée pendant 1 minute (OK pour reprendre avant)" else "Reprise du défilement",
             3_000,
         )
     }
 
     /** Passe tout de suite à la photo suivante. */
-    fun skip() {
-        paused = false
-        skipRequested = true
-    }
+    fun skip() = timeline.skip()
 
     private fun showNotice(text: String, durationMs: Long) {
         notice = text
@@ -291,15 +281,10 @@ class SlideshowView(context: Context) : View(context) {
     }
 
     private fun updatePhase(now: Long) {
-        val elapsed = now - phaseStart
-        if (paused && now - pausedAt >= PAUSE_MAX_MS) {
-            paused = false // reprise automatique au bout d'une minute
-            showNotice("Reprise du défilement", 2_500)
-        }
-        when (phase) {
-            Phase.WAIT -> {
-                val ready = next
-                if (ready != null && elapsed >= PAUSE_MS) {
+        for (event in timeline.update(now, nextReady = next != null, loading = loadingNext)) {
+            when (event) {
+                Timeline.Event.START_PHOTO -> {
+                    val ready = next ?: continue
                     val tile = pickTile()
                     tile.show(ready.tile, now)
                     addToPool(ready.tile)
@@ -307,35 +292,15 @@ class SlideshowView(context: Context) : View(context) {
                     currentTile = tile
                     next = null
                     requestNext() // on prépare déjà la suivante pendant l'affichage
-                    go(Phase.FADE_IN, now)
-                } else if (ready == null && !loadingNext && elapsed > RETRY_MS) {
-                    requestNext()
-                    phaseStart = now
                 }
-            }
-            Phase.FADE_IN -> if (elapsed >= FADE_MS) go(Phase.ZOOM_IN, now)
-            Phase.ZOOM_IN -> if (elapsed >= ZOOM_MS) go(Phase.HOLD, now)
-            Phase.HOLD -> when {
-                skipRequested -> {
-                    skipRequested = false
-                    go(Phase.ZOOM_OUT, now)
+                Timeline.Event.PHOTO_DONE -> {
+                    current = null
+                    currentTile = null
                 }
-                // photo fixée : le temps d'affichage reste bloqué à mi-parcours
-                paused -> phaseStart = now - min(elapsed, holdMs / 2)
-                elapsed >= holdMs -> go(Phase.ZOOM_OUT, now)
-            }
-            Phase.ZOOM_OUT -> if (elapsed >= ZOOM_MS) go(Phase.FADE_OUT, now)
-            Phase.FADE_OUT -> if (elapsed >= FADE_MS) {
-                current = null
-                currentTile = null
-                go(Phase.WAIT, now)
+                Timeline.Event.RETRY_LOAD -> requestNext()
+                Timeline.Event.AUTO_RESUMED -> showNotice("Reprise du défilement", 2_500)
             }
         }
-    }
-
-    private fun go(p: Phase, now: Long) {
-        phase = p
-        phaseStart = now
     }
 
     /** Choisit une vignette plutôt grande, vers le centre de l'écran. */
@@ -393,25 +358,10 @@ class SlideshowView(context: Context) : View(context) {
     private var fgKenBurns = 0f
 
     private fun drawPhotoParams(now: Long): Float {
-        val elapsed = (now - phaseStart).toFloat()
-        fun t(duration: Long) = (elapsed / duration).coerceIn(0f, 1f)
-        fgZoom = 0f
-        fgAlpha = 1f
-        fgKenBurns = 0f
-        when (phase) {
-            Phase.WAIT -> fgAlpha = 0f
-            Phase.FADE_IN -> fgAlpha = t(FADE_MS)
-            Phase.ZOOM_IN -> fgZoom = ease(t(ZOOM_MS))
-            Phase.HOLD -> {
-                fgZoom = 1f
-                fgKenBurns = t(holdMs)
-            }
-            Phase.ZOOM_OUT -> {
-                fgZoom = 1f - ease(t(ZOOM_MS))
-                fgKenBurns = 1f
-            }
-            Phase.FADE_OUT -> fgAlpha = 1f - t(FADE_MS)
-        }
+        val frame = timeline.frame(now)
+        fgZoom = frame.zoom
+        fgAlpha = frame.alpha
+        fgKenBurns = frame.kenBurns
         return fgZoom
     }
 
@@ -527,17 +477,9 @@ class SlideshowView(context: Context) : View(context) {
         )
     }
 
-    /** Accélère puis ralentit en douceur. */
-    private fun ease(t: Float): Float =
-        if (t < 0.5f) 4 * t * t * t else 1 - (-2 * t + 2).pow(3) / 2
 
     companion object {
-        private const val FADE_MS = 700L
-        private const val ZOOM_MS = 1800L
-        private const val PAUSE_MS = 900L
         private const val TILE_FADE_MS = 700L
-        private const val RETRY_MS = 15_000L
         private const val MAX_POOL = 120
-        private const val PAUSE_MAX_MS = 60_000L
     }
 }

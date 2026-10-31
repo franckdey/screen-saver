@@ -94,7 +94,7 @@ object Images {
     }
 
     /** Plus grande puissance de 2 qui garde une image au moins aussi grande que demandé. */
-    private fun sampleSizeFor(scale: Float): Int {
+    internal fun sampleSizeFor(scale: Float): Int {
         var sample = 1
         if (scale <= 0f) return sample
         while (sample * 2 <= 1f / scale) sample *= 2
