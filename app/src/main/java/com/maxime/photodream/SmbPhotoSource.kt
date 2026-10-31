@@ -161,16 +161,21 @@ class SmbPhotoSource(
             SMB2CreateDisposition.FILE_OPEN,
             null,
         ).use { file ->
-            val out = ByteArrayOutputStream()
+            // On s'arrête à la taille connue du fichier : certains serveurs (Freebox) ne
+            // répondent jamais à une lecture demandée pile à la fin du fichier.
+            val size = file.fileInformation.standardInformation.endOfFile
+            val out = ByteArrayOutputStream(size.coerceIn(0, Int.MAX_VALUE.toLong()).toInt())
             val buffer = ByteArray(READ_CHUNK)
             var offset = 0L
-            while (true) {
-                val n = file.read(buffer, offset)
+            while (offset < size) {
+                val wanted = minOf(READ_CHUNK.toLong(), size - offset).toInt()
+                val n = file.read(buffer, offset, 0, wanted)
                 if (n <= 0) break
                 out.write(buffer, 0, n)
                 offset += n
                 onProgress(offset)
             }
+            if (offset < size) throw IOException("Fichier incomplet : $offset octets sur $size")
             out.toByteArray()
         }
     }
