@@ -135,6 +135,10 @@ Ensuite :
 2. **Lancer le diaporama** pour voir le rendu (Retour pour quitter).
 3. Ajuster la durée d'affichage, la densité des vignettes, le flou, l'heure…
 
+La liste des photos est mémorisée : le diaporama démarre tout de suite, même avec des
+milliers de photos, puis relit le dossier en arrière-plan pour prendre en compte les photos
+ajoutées ou supprimées. Changer de dossier (ou « Vider le cache ») repart d'une liste neuve.
+
 Formats pris en charge : JPEG, PNG, WebP, BMP, et HEIC à partir d'Android 9.
 Les dossiers techniques (`@eaDir` de Synology, `#recycle`, fichiers cachés) sont ignorés.
 

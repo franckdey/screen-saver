@@ -22,8 +22,10 @@ class PhotoRepository(
     private val sourceFactory: (Prefs) -> PhotoSource? = ::smbSource,
 ) : Closeable {
     private val cacheDir = File(context.cacheDir, "photos").apply { mkdirs() }
+    /** Liste des photos du dernier parcours, pour démarrer sans relire tout le NAS. */
+    private val listingFile = File(context.filesDir, "liste-photos.txt")
     private var source: PhotoSource? = null
-    private var photos: List<RemotePhoto> = emptyList()
+    @Volatile private var photos: List<RemotePhoto> = emptyList()
     private val queue = ArrayDeque<RemotePhoto>()
     private var downloadsSinceTrim = 0
 
@@ -35,10 +37,19 @@ class PhotoRepository(
     var offline = false
         private set
 
-    /** Parcourt le dossier réseau. Renvoie le nombre de photos disponibles. */
-    suspend fun load(): Int = withContext(Dispatchers.IO) {
+    /** Vrai si [load] a repris la liste mémorisée : appeler [refresh] pour la remettre à jour. */
+    var usedSavedListing = false
+        private set
+
+    /**
+     * Prépare la liste des photos. Renvoie le nombre de photos disponibles.
+     * Avec [useSaved], la liste mémorisée du même dossier est reprise tout de suite
+     * (un gros NAS peut mettre plusieurs minutes à être parcouru).
+     */
+    suspend fun load(useSaved: Boolean = false): Int = withContext(Dispatchers.IO) {
         lastError = null
         offline = false
+        usedSavedListing = false
         source?.close()
         source = null
         val src = sourceFactory(prefs)
@@ -46,14 +57,21 @@ class PhotoRepository(
             lastError = "Aucun dossier réseau configuré (ouvre l'appli PhotoDream pour le régler)"
         } else {
             source = src
-            try {
-                photos = src.listPhotos(prefs.recursive)
-                if (photos.isEmpty()) lastError = "Aucune photo trouvée dans ce dossier"
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                lastError = SmbPhotoSource.describe(e)
-                photos = emptyList()
+            val saved = if (useSaved) readListing() else null
+            if (!saved.isNullOrEmpty()) {
+                photos = saved
+                usedSavedListing = true
+            } else {
+                try {
+                    photos = src.listPhotos(prefs.recursive)
+                    if (photos.isEmpty()) lastError = "Aucune photo trouvée dans ce dossier"
+                    saveListing(photos)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    lastError = SmbPhotoSource.describe(e)
+                    photos = emptyList()
+                }
             }
         }
         if (photos.isEmpty()) {
@@ -65,6 +83,75 @@ class PhotoRepository(
         }
         queue.clear()
         photos.size
+    }
+
+    /**
+     * Relit le dossier en arrière-plan après un démarrage sur la liste mémorisée, pour
+     * prendre en compte les photos ajoutées ou supprimées. Renvoie vrai si la liste a changé.
+     */
+    suspend fun refresh(): Boolean = withContext(Dispatchers.IO) {
+        // Connexion séparée : le parcours peut être long et ne doit pas bloquer les téléchargements.
+        val src = sourceFactory(prefs) ?: return@withContext false
+        val fresh = try {
+            src.listPhotos(prefs.recursive)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return@withContext false // NAS injoignable : on garde la liste mémorisée
+        } finally {
+            runCatching { src.close() }
+        }
+        if (fresh.isEmpty()) return@withContext false
+        saveListing(fresh)
+        if (fresh.toSet() == photos.toSet()) return@withContext false
+        replacePhotos(fresh)
+        true
+    }
+
+    @Synchronized
+    private fun replacePhotos(list: List<RemotePhoto>) {
+        photos = list
+        // garde l'ordre en cours pour les photos toujours présentes, ajoute les nouvelles
+        val present = list.toHashSet()
+        val kept = queue.filter { it in present }
+        val known = kept.toHashSet()
+        queue.clear()
+        queue.addAll(kept)
+        queue.addAll(list.filter { it !in known }.shuffled())
+    }
+
+    /** Clé du dossier réglé : une autre adresse ou un autre choix de sous-dossiers invalide la liste. */
+    private fun listingKey() = "${prefs.address.trim()}|${prefs.recursive}"
+
+    private fun saveListing(list: List<RemotePhoto>) {
+        if (list.isEmpty()) return
+        try {
+            val tmp = File(listingFile.path + ".tmp")
+            tmp.bufferedWriter().use { w ->
+                w.write(listingKey())
+                w.newLine()
+                for (p in list) {
+                    w.write("${p.size}\t${p.modified}\t${p.path}")
+                    w.newLine()
+                }
+            }
+            tmp.renameTo(listingFile)
+        } catch (e: Exception) {
+            // pas grave : on relira le dossier la prochaine fois
+        }
+    }
+
+    private fun readListing(): List<RemotePhoto>? = try {
+        listingFile.takeIf { it.exists() }?.bufferedReader()?.use { r ->
+            if (r.readLine() != listingKey()) return@use null
+            r.lineSequence().mapNotNull { line ->
+                val parts = line.split('\t', limit = 3)
+                if (parts.size < 3) return@mapNotNull null
+                RemotePhoto(parts[2], parts[0].toLongOrNull() ?: return@mapNotNull null, parts[1].toLongOrNull() ?: 0L)
+            }.toList()
+        }
+    } catch (e: Exception) {
+        null
     }
 
     /** Photo suivante (ordre aléatoire, sans répétition avant d'avoir tout vu). */
@@ -155,6 +242,7 @@ class PhotoRepository(
 
     fun clearCache() {
         cacheDir.listFiles()?.forEach { it.delete() }
+        listingFile.delete()
     }
 
     override fun close() {
