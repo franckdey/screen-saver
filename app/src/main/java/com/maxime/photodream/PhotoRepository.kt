@@ -336,13 +336,17 @@ class PhotoRepository(
     }
 
     /**
-     * Texte affiché sur la photo : lieu (d'après le GPS) et date, ou le nom de la photo à défaut.
+     * Texte affiché sur la photo : lieu (d'après le GPS) et date, ou le dossier et le nom de la photo à défaut.
      * Pour une photo déjà en cache sans ces infos, on relit juste le début du fichier.
      */
     private suspend fun caption(photo: RemotePhoto, file: File): String {
         if (!prefs.showFolder) return ""
         val offline = photo.path.startsWith(CACHE_PREFIX)
-        val fileName = if (offline) "" else name(photo).substringBeforeLast('.')
+        // sans lieu connu : le dossier et le nom de la photo
+        val fallback = if (offline) "" else listOf(
+            source?.folderLabel(photo).orEmpty(),
+            name(photo).substringBeforeLast('.'),
+        ).filter { it.isNotBlank() }.joinToString(" · ")
         var meta = readMeta(file)
         if (meta == null && !offline) {
             meta = try {
@@ -355,7 +359,7 @@ class PhotoRepository(
             meta?.let { writeMeta(file, it) }
         }
         val place = meta?.let { m -> if (m.lat != null && m.lon != null) places.name(m.lat, m.lon) else null }
-        return Captions.format(place, meta?.taken, fileName)
+        return Captions.format(place, meta?.taken, fallback)
     }
 
     private fun metaFile(file: File) = File(file.path.removeSuffix(".jpg") + ".meta")
