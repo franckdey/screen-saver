@@ -86,8 +86,8 @@ class PhotoRepositoryTest {
         val r = repo(FakeSource(photos(3)))
         assertEquals(3, r.load())
         val p = r.nextPhoto(1)!!
-        // pas de GPS ni de date dans ces images de test : le nom de la photo sert de légende
-        assertTrue(p.label.matches(Regex("IMG_[123]")))
+        // pas de GPS ni de date dans ces images de test : le dossier et le nom de la photo servent de légende
+        assertTrue(p.label, p.label.matches(Regex("""Vacances\\Corse · IMG_[123]""")))
         assertEquals(640, p.full.width)
         assertEquals(320 to 240, p.tile.width to p.tile.height)
     }
