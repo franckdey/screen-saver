@@ -91,6 +91,21 @@ class SmbIntegrationTest {
                 (session.connectShare(share) as DiskShare).use { write(it, "grande.jpg", big) }
             }
         }
+        // taille multiple exact des blocs de 64 Ko, et fichier vide
+        val exact = ByteArray(128 * 1024) { (it % 7).toByte() }
+        SMBClient().use { client ->
+            client.connect(host).use { conn ->
+                val session = conn.authenticate(AuthenticationContext(user, password.toCharArray(), null))
+                (session.connectShare(share) as DiskShare).use {
+                    write(it, "exacte.jpg", exact)
+                    write(it, "vide.jpg", ByteArray(0))
+                }
+            }
+        }
+        source().use { src ->
+            assertArrayEquals(exact, src.read("exacte.jpg"))
+            assertEquals(0, src.read("vide.jpg").size)
+        }
         // à la racine du partage, hors du dossier « Vacances » listé par les autres tests
         source().use { src -> assertArrayEquals(big, src.read("grande.jpg")) }
         // le mode compatible (SMB 2) lit aussi correctement
