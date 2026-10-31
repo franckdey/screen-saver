@@ -4,6 +4,7 @@ import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.mserref.NtStatus
 import com.hierynomus.msfscc.FileAttributes
 import com.hierynomus.mssmb2.SMB2CreateDisposition
+import com.hierynomus.mssmb2.SMB2Dialect
 import com.hierynomus.mssmb2.SMB2ShareAccess
 import com.hierynomus.mssmb2.SMBApiException
 import com.hierynomus.smbj.SMBClient
@@ -16,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
@@ -49,17 +51,19 @@ class SmbPhotoSource(
     private val password: String,
     private val domain: String,
     private val sdkInt: Int = android.os.Build.VERSION.SDK_INT,
+    compat: Boolean = false,
+    /** Appelé quand la source passe d'elle-même en mode compatible, pour s'en souvenir. */
+    private val onCompat: () -> Unit = {},
+    /** Faux pour le diagnostic, qui veut tester chaque mode séparément. */
+    private val autoCompat: Boolean = true,
 ) : PhotoSource {
 
-    private val client = SMBClient(
-        SmbConfig.builder()
-            .withTimeout(20, TimeUnit.SECONDS)
-            .withSoTimeout(60, TimeUnit.SECONDS)
-            // Lectures par blocs de 64 Ko (un seul « crédit » SMB) : certains NAS et box
-            // répondent mal aux grosses lectures négociées, et le téléchargement reste bloqué.
-            .withReadBufferSize(64 * 1024)
-            .build()
-    )
+    /** Vrai en mode compatible : SMB 2.0/2.1 seulement, sans chiffrement ni signature imposée. */
+    var compatMode = compat
+        private set
+
+    private var client = SMBClient(config(compat))
+
     private var connection: Connection? = null
     private var session: Session? = null
     private var share: DiskShare? = null
@@ -94,9 +98,29 @@ class SmbPhotoSource(
                 throw e // erreur « logique » (mot de passe, dossier…) : inutile de réessayer
             } catch (e: Exception) {
                 closeQuietly()
-                block(connectedShare())
+                try {
+                    block(connectedShare())
+                } catch (e2: CancellationException) {
+                    throw e2
+                } catch (e2: SMBApiException) {
+                    throw e2
+                } catch (e2: Exception) {
+                    if (compatMode || !autoCompat) throw e2
+                    // Deux échecs de suite (souvent un délai dépassé pendant une lecture) :
+                    // on réessaie avec un protocole plus simple que certains NAS gèrent mieux.
+                    switchToCompat()
+                    block(connectedShare())
+                }
             }
         }
+    }
+
+    private fun switchToCompat() {
+        closeQuietly()
+        runCatching { client.close() }
+        compatMode = true
+        client = SMBClient(config(true))
+        onCompat()
     }
 
     override suspend fun listPhotos(recursive: Boolean, limit: Int): List<RemotePhoto> = withShare { disk ->
@@ -122,7 +146,13 @@ class SmbPhotoSource(
         out
     }
 
-    override suspend fun read(path: String): ByteArray = withShare { disk ->
+    override suspend fun read(path: String): ByteArray = read(path) {}
+
+    /**
+     * Lit un fichier par blocs, une requête à la fois (pas de lecture anticipée, que certains
+     * serveurs gèrent mal). [onProgress] reçoit le nombre d'octets déjà reçus.
+     */
+    suspend fun read(path: String, onProgress: (Long) -> Unit): ByteArray = withShare { disk ->
         disk.openFile(
             path,
             EnumSet.of(AccessMask.GENERIC_READ),
@@ -130,7 +160,19 @@ class SmbPhotoSource(
             SMB2ShareAccess.ALL,
             SMB2CreateDisposition.FILE_OPEN,
             null,
-        ).use { file -> file.inputStream.use { it.readBytes() } }
+        ).use { file ->
+            val out = ByteArrayOutputStream()
+            val buffer = ByteArray(READ_CHUNK)
+            var offset = 0L
+            while (true) {
+                val n = file.read(buffer, offset)
+                if (n <= 0) break
+                out.write(buffer, 0, n)
+                offset += n
+                onProgress(offset)
+            }
+            out.toByteArray()
+        }
     }
 
     /** Nom du dossier de la photo, relatif au dossier choisi (« 2019 Corse › Plage »). */
@@ -151,6 +193,23 @@ class SmbPhotoSource(
     }
 
     companion object {
+        private const val READ_CHUNK = 64 * 1024
+
+        /** Réglages du client SMB ; [compat] : SMB 2.0/2.1 seulement, sans chiffrement. */
+        fun config(compat: Boolean): SmbConfig {
+            val builder = SmbConfig.builder()
+                .withTimeout(20, TimeUnit.SECONDS)
+                .withSoTimeout(60, TimeUnit.SECONDS)
+                // blocs de 64 Ko (un seul « crédit » SMB), mieux supportés par les petits NAS
+                .withReadBufferSize(READ_CHUNK)
+            if (compat) {
+                builder.withDialects(SMB2Dialect.SMB_2_1, SMB2Dialect.SMB_2_0_2)
+                    .withEncryptData(false)
+                    .withSigningRequired(false)
+            }
+            return builder.build()
+        }
+
         private val EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "bmp", "heic", "heif")
 
         /** HEIC n'est lisible qu'à partir d'Android 9 (API 28). */

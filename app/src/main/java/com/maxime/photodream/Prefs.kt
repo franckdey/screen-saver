@@ -23,6 +23,11 @@ class Prefs(context: Context) {
         get() = sp.getString("domain", "") ?: ""
         set(v) = sp.edit().putString("domain", v.trim()).apply()
 
+    /** Mode SMB « compatible » (SMB 2, sans chiffrement), choisi automatiquement si le NAS bloque les lectures. */
+    var smbCompat: Boolean
+        get() = sp.getBoolean("smbCompat", false)
+        set(v) = sp.edit().putBoolean("smbCompat", v).apply()
+
     var recursive: Boolean
         get() = sp.getBoolean("recursive", true)
         set(v) = sp.edit().putBoolean("recursive", v).apply()
