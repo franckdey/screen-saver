@@ -262,7 +262,11 @@ class PhotoRepository(
         /** La source par défaut : le partage SMB réglé dans l'appli, ou null s'il n'y en a pas. */
         fun smbSource(prefs: Prefs): PhotoSource? {
             val location = SmbLocation.parse(prefs.address) ?: return null
-            return SmbPhotoSource(location, prefs.user, prefs.password, prefs.domain)
+            return SmbPhotoSource(
+                location, prefs.user, prefs.password, prefs.domain,
+                compat = prefs.smbCompat,
+                onCompat = { prefs.smbCompat = true },
+            )
         }
 
         private const val CACHE_PREFIX = "cache:"

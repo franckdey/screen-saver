@@ -19,6 +19,59 @@ class PhotoDiagnostic(
 ) {
     class Result(val report: String, val bitmap: Bitmap?)
 
+    /**
+     * Téléchargement en mode normal, puis en mode compatible (SMB 2) si le premier échoue,
+     * en indiquant combien d'octets sont arrivés avant l'erreur.
+     */
+    private suspend fun download(
+        src: PhotoSource,
+        path: String,
+        step: (String) -> Unit,
+        elapsed: () -> String,
+        lines: MutableList<String>,
+        onStep: (String) -> Unit,
+    ): ByteArray? {
+        if (src !is SmbPhotoSource) {
+            return src.read(path).also { step("3. Téléchargée : ${it.size / 1024} Ko (${elapsed()})") }
+        }
+        val location = SmbLocation.parse(prefs.address) ?: return null
+        for (compat in listOf(false, true)) {
+            val label = if (compat) "mode compatible SMB 2" else "mode normal"
+            val source = SmbPhotoSource(location, prefs.user, prefs.password, prefs.domain, compat = compat, autoCompat = false)
+            var received = 0L
+            step("3. Téléchargement ($label)…")
+            try {
+                val bytes = source.read(path) { done ->
+                    received = done
+                    lines[lines.lastIndex] = "3. Téléchargement ($label) : ${done / 1024} Ko…"
+                    onStep(lines.joinToString("\n"))
+                }
+                lines[lines.lastIndex] = "3. Téléchargée en $label : ${bytes.size / 1024} Ko (${elapsed()})"
+                onStep(lines.joinToString("\n"))
+                if (prefs.smbCompat != compat) {
+                    prefs.smbCompat = compat
+                    step("   → ${if (compat) "mode compatible activé" else "mode normal rétabli"} pour le diaporama")
+                }
+                return bytes
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                lines[lines.lastIndex] = "3. Échec en $label après ${received / 1024} Ko (${elapsed()}) : " +
+                    "${t.javaClass.simpleName} ${rootMessage(t)}"
+                onStep(lines.joinToString("\n"))
+            } finally {
+                runCatching { source.close() }
+            }
+        }
+        return null
+    }
+
+    private fun rootMessage(t: Throwable): String {
+        var c: Throwable = t
+        while (c.cause != null && c.cause !== c) c = c.cause!!
+        return "(${c.javaClass.simpleName} : ${c.message})"
+    }
+
     suspend fun run(onStep: (String) -> Unit = {}): Result = withContext(Dispatchers.IO) {
         val lines = ArrayList<String>()
         var started = SystemClock.elapsedRealtime()
@@ -47,11 +100,9 @@ class PhotoDiagnostic(
             val photo = list.random()
             step("2. Photo choisie : ${photo.path} (${photo.size / 1024} Ko)")
 
-            step("3. Téléchargement…")
             current = "téléchargement"
-            val bytes = src.read(photo.path)
-            lines[lines.lastIndex] = "3. Téléchargée : ${bytes.size / 1024} Ko (${elapsed()})"
-            onStep(lines.joinToString("\n"))
+            val bytes = download(src, photo.path, ::step, ::elapsed, lines, onStep)
+                ?: return@withContext Result(lines.joinToString("\n"), null)
 
             current = "lecture des dimensions"
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

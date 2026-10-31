@@ -88,10 +88,15 @@ class SmbIntegrationTest {
         SMBClient().use { client ->
             client.connect(host).use { conn ->
                 val session = conn.authenticate(AuthenticationContext(user, password.toCharArray(), null))
-                (session.connectShare(share) as DiskShare).use { write(it, "Vacances\\grande.jpg", big) }
+                (session.connectShare(share) as DiskShare).use { write(it, "grande.jpg", big) }
             }
         }
-        source().use { src -> assertArrayEquals(big, src.read("Vacances\\grande.jpg")) }
+        // à la racine du partage, hors du dossier « Vacances » listé par les autres tests
+        source().use { src -> assertArrayEquals(big, src.read("grande.jpg")) }
+        // le mode compatible (SMB 2) lit aussi correctement
+        SmbPhotoSource(SmbLocation(host, share, "Vacances"), user, password, "", sdkInt = 34, compat = true).use { src ->
+            assertArrayEquals(big, src.read("grande.jpg"))
+        }
     }
 
     @Test
