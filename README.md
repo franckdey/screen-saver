@@ -195,12 +195,32 @@ a retiré ce menu sur ses modèles récents.
 
 ---
 
+## Tests
+
+Chaque pull request lance le workflow **Tests** (`.github/workflows/tests.yml`) :
+
+- **tests unitaires** : lecture de l'adresse SMB, formats reconnus, messages d'erreur, nom de
+  dossier affiché, minuterie de l'animation (zoom, photo fixée, reprise après une minute,
+  photo suivante) ;
+- **tests Robolectric** (Android simulé sur la JVM) : réduction des photos en Full HD, remise à
+  l'endroit d'après l'EXIF, flou des vignettes, cache, ordre sans répétition, mode hors ligne ;
+- **tests d'intégration** contre un vrai serveur Samba démarré dans GitHub Actions : liste
+  récursive, dossiers ignorés (`@eaDir`, fichiers cachés), lecture, mauvais mot de passe,
+  partage ou dossier introuvable ;
+- **lint** Android puis compilation de l'APK.
+
+En local : `./gradlew testDebugUnitTest` (les tests Samba sont ignorés sans la variable
+`SMB_TEST_HOST`).
+
+---
+
 ## Organisation du code
 
-- `SlideshowView.kt` : l'animation (mosaïque, zoom, Ken Burns, textes).
+- `SlideshowView.kt` : le dessin de l'animation (vignettes, zoom, cadre, textes).
+- `Timeline.kt` : le déroulé de chaque photo, la pause et la reprise (sans dessin, testé).
 - `PhotoDreamService.kt` : l'économiseur d'écran Android (*DreamService*).
 - `SlideshowActivity.kt` : le diaporama lancé à la main.
 - `SettingsActivity.kt` : l'écran de réglages pour la télécommande.
-- `SmbPhotoSource.kt` : connexion au partage SMB (bibliothèque *smbj*).
+- `PhotoSource.kt`, `SmbPhotoSource.kt` : connexion au partage SMB (bibliothèque *smbj*).
 - `PhotoRepository.kt`, `Images.kt` : ordre aléatoire, téléchargement, cache, réduction,
   rotation EXIF et flou des vignettes.

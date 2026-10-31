@@ -16,9 +16,13 @@ class LoadedPhoto(val full: Bitmap, val tile: Bitmap, val label: String)
  * Liste les photos du partage, les télécharge et les garde en cache (réduites à la taille
  * de l'écran) pour que les passages suivants soient instantanés et marchent même si le NAS dort.
  */
-class PhotoRepository(context: Context, private val prefs: Prefs) : Closeable {
+class PhotoRepository(
+    context: Context,
+    private val prefs: Prefs,
+    private val sourceFactory: (Prefs) -> PhotoSource? = ::smbSource,
+) : Closeable {
     private val cacheDir = File(context.cacheDir, "photos").apply { mkdirs() }
-    private var source: SmbPhotoSource? = null
+    private var source: PhotoSource? = null
     private var photos: List<RemotePhoto> = emptyList()
     private val queue = ArrayDeque<RemotePhoto>()
     private var downloadsSinceTrim = 0
@@ -37,11 +41,10 @@ class PhotoRepository(context: Context, private val prefs: Prefs) : Closeable {
         offline = false
         source?.close()
         source = null
-        val location = SmbLocation.parse(prefs.address)
-        if (location == null) {
+        val src = sourceFactory(prefs)
+        if (src == null) {
             lastError = "Aucun dossier réseau configuré (ouvre l'appli PhotoDream pour le régler)"
         } else {
-            val src = SmbPhotoSource(location, prefs.user, prefs.password, prefs.domain)
             source = src
             try {
                 photos = src.listPhotos(prefs.recursive)
@@ -111,7 +114,7 @@ class PhotoRepository(context: Context, private val prefs: Prefs) : Closeable {
             if (!Images.downscaleToJpeg(bytes, file)) return null
             if (++downloadsSinceTrim >= 20) {
                 downloadsSinceTrim = 0
-                trimCache()
+                trimCache(keep = file)
             }
             file
         } catch (e: CancellationException) {
@@ -126,12 +129,13 @@ class PhotoRepository(context: Context, private val prefs: Prefs) : Closeable {
 
     /** Supprime les photos les moins récemment vues quand le cache dépasse la taille choisie. */
     @Synchronized
-    private fun trimCache() {
+    private fun trimCache(keep: File) {
         val files = cacheDir.listFiles().orEmpty().sortedBy { it.lastModified() }
         var total = files.sumOf { it.length() }
         val max = prefs.cacheMb * 1024L * 1024L
         for (f in files) {
             if (total <= max) break
+            if (f == keep) continue // la photo qu'on vient de télécharger va être affichée
             total -= f.length()
             f.delete()
         }
@@ -153,6 +157,12 @@ class PhotoRepository(context: Context, private val prefs: Prefs) : Closeable {
     }
 
     companion object {
+        /** La source par défaut : le partage SMB réglé dans l'appli, ou null s'il n'y en a pas. */
+        fun smbSource(prefs: Prefs): PhotoSource? {
+            val location = SmbLocation.parse(prefs.address) ?: return null
+            return SmbPhotoSource(location, prefs.user, prefs.password, prefs.domain)
+        }
+
         private const val CACHE_PREFIX = "cache:"
         private const val MAX_ATTEMPTS = 8
     }
