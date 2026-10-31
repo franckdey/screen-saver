@@ -11,8 +11,18 @@ android {
         applicationId = "com.maxime.photodream"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        // Numéro fourni par GitHub Actions à chaque compilation (1 en local) :
+        // l'appli compare le sien à celui de la dernière Release pour proposer la mise à jour.
+        val build = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
+        versionCode = build
+        versionName = "1.$build"
+
+        // Où chercher les mises à jour (fichier version.json publié avec l'APK)
+        buildConfigField(
+            "String",
+            "UPDATE_BASE_URL",
+            "\"https://github.com/franckdey/screen-saver/releases/latest/download/\"",
+        )
     }
 
     // Clé de signature fournie avec le projet : chaque build (PC, GitHub…) produit
@@ -34,6 +44,10 @@ android {
         debug {
             signingConfig = signingConfigs.getByName("photodream")
         }
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {
