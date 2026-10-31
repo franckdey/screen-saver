@@ -3,6 +3,7 @@ package com.maxime.photodream
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.net.Uri
 import android.graphics.Color
 import android.os.Bundle
 import android.provider.Settings
@@ -16,9 +17,12 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /** Écran de réglages, pensé pour la télécommande (tout se fait aux flèches + OK). */
 class SettingsActivity : Activity() {
@@ -33,6 +37,10 @@ class SettingsActivity : Activity() {
     private lateinit var showFolder: CheckBox
     private lateinit var showClock: CheckBox
     private lateinit var status: TextView
+    private lateinit var updateButton: Button
+    private val updater = Updater(BuildConfig.UPDATE_BASE_URL, BuildConfig.VERSION_CODE)
+    private var available: UpdateInfo? = null
+    private var updating = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,7 +54,17 @@ class SettingsActivity : Activity() {
             setPadding(margin, dp(32), margin, dp(32))
         }
         root.addView(text("PhotoDream", 28f, bold = true))
-        root.addView(text("Économiseur d'écran avec les photos de ton NAS", 16f).apply { alpha = 0.7f })
+        root.addView(text("Économiseur d'écran avec les photos de ton NAS · version ${BuildConfig.VERSION_NAME}", 16f).apply { alpha = 0.7f })
+
+        // Bouton mis en avant, visible seulement quand une nouvelle version existe.
+        updateButton = button("") { installUpdate() }.apply {
+            visibility = View.GONE
+            setBackgroundColor(Color.rgb(46, 125, 50))
+            setTextColor(Color.WHITE)
+        }
+        root.addView(updateButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(16)
+        })
 
         address = field(root, "Dossier réseau (ex. smb://192.168.1.20/photo/Vacances)", prefs.address)
         user = field(root, "Utilisateur (laisser vide pour un accès invité)", prefs.user)
@@ -84,6 +102,7 @@ class SettingsActivity : Activity() {
             PhotoRepository(this, prefs).clearCache()
             status.text = "Cache vidé."
         })
+        buttons.addView(button("Rechercher une mise à jour") { checkUpdate(manual = true) })
         root.addView(buttons)
 
         status = text("", 16f).apply { setPadding(0, dp(16), 0, 0) }
@@ -94,6 +113,7 @@ class SettingsActivity : Activity() {
             addView(root)
         })
         address.requestFocus()
+        checkUpdate(manual = false)
     }
 
     override fun onPause() {
@@ -128,6 +148,68 @@ class SettingsActivity : Activity() {
                 else -> "OK : $count photos trouvées."
             }
             Thread { repo.close() }.start()
+        }
+    }
+
+    // --- Mise à jour intégrée ---------------------------------------------------------------
+
+    private fun checkUpdate(manual: Boolean) {
+        if (updating) return
+        if (manual) status.text = "Recherche d'une mise à jour…"
+        scope.launch {
+            val result = runCatching { withContext(Dispatchers.IO) { updater.check() } }
+            available = result.getOrNull()
+            val info = available
+            if (info != null) {
+                updateButton.text = "Installer la mise à jour (version ${info.versionName})"
+                updateButton.visibility = View.VISIBLE
+                if (manual) {
+                    status.text = "Nouvelle version ${info.versionName} disponible."
+                    updateButton.requestFocus()
+                }
+            } else if (manual) {
+                status.text = result.exceptionOrNull()?.let { "Impossible de vérifier : ${Updater.describe(it)}" }
+                    ?: "PhotoDream est à jour (version ${BuildConfig.VERSION_NAME})."
+            }
+        }
+    }
+
+    private fun installUpdate() {
+        val info = available ?: return
+        if (updating) return
+        if (!ApkInstaller.canInstall(this)) {
+            askInstallPermission()
+            return
+        }
+        updating = true
+        updateButton.isEnabled = false
+        status.text = "Téléchargement de la version ${info.versionName}…"
+        scope.launch {
+            try {
+                val apk = withContext(Dispatchers.IO) {
+                    updater.download(File(cacheDir, "updates/${Updater.APK_NAME}")) { percent ->
+                        if (percent >= 0) runOnUiThread { status.text = "Téléchargement de la version ${info.versionName} : $percent %" }
+                    }
+                }
+                status.text = "Installation… confirme sur l'écran qui s'affiche."
+                withContext(Dispatchers.IO) { ApkInstaller.install(this@SettingsActivity, apk) }
+            } catch (e: Exception) {
+                status.text = "Mise à jour impossible : ${Updater.describe(e)}"
+            } finally {
+                updating = false
+                updateButton.isEnabled = true
+            }
+        }
+    }
+
+    private fun askInstallPermission() {
+        status.text = "Autorise PhotoDream à installer des applis (« Sources inconnues »), " +
+            "puis appuie de nouveau sur « Installer la mise à jour »."
+        try {
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+        } catch (e: ActivityNotFoundException) {
+            status.text = "Autorise PhotoDream dans Paramètres › Applications › Sécurité et restrictions › " +
+                "Sources inconnues, puis appuie de nouveau sur « Installer la mise à jour »."
         }
     }
 

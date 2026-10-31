@@ -92,6 +92,23 @@ ce gestionnaire à installer des applis inconnues.
 
 ---
 
+### Mettre à jour
+
+Chaque modification fusionnée dans `main` publie une nouvelle version (numérotée 1.N) dans
+la Release *latest*. Au démarrage, l'écran de réglages de PhotoDream vérifie s'il en existe
+une plus récente et affiche alors un bouton vert **« Installer la mise à jour »** ; le bouton
+**« Rechercher une mise à jour »** fait la même vérification à la demande.
+
+La première fois, Android demande d'autoriser PhotoDream à installer des applis
+(*Sources inconnues*) : l'appli ouvre directement ce réglage quand la TV le propose, sinon
+il se trouve dans *Paramètres › Applications › Sécurité et restrictions › Sources inconnues*.
+Ensuite il suffit de confirmer l'installation. Les réglages sont conservés.
+
+> Les versions installées avant l'arrivée de cette fonction ne savent pas se mettre à jour
+> seules : il faut les remplacer une dernière fois à la main (Downloader, même lien).
+
+---
+
 ## 3. Configurer
 
 Ouvrir **PhotoDream** depuis l'écran d'accueil de la TV (rangée des applis) :
@@ -201,7 +218,8 @@ Chaque pull request lance le workflow **Tests** (`.github/workflows/tests.yml`) 
 
 - **tests unitaires** : lecture de l'adresse SMB, formats reconnus, messages d'erreur, nom de
   dossier affiché, minuterie de l'animation (zoom, photo fixée, reprise après une minute,
-  photo suivante) ;
+  photo suivante), mise à jour intégrée (lecture de `version.json`, comparaison des versions,
+  téléchargement de l'APK à travers une redirection comme celle de GitHub) ;
 - **tests Robolectric** (Android simulé sur la JVM) : réduction des photos en Full HD, remise à
   l'endroit d'après l'EXIF, flou des vignettes, cache, ordre sans répétition, mode hors ligne ;
 - **tests d'intégration** contre un vrai serveur Samba démarré dans GitHub Actions : liste
@@ -222,5 +240,7 @@ En local : `./gradlew testDebugUnitTest` (les tests Samba sont ignorés sans la 
 - `SlideshowActivity.kt` : le diaporama lancé à la main.
 - `SettingsActivity.kt` : l'écran de réglages pour la télécommande.
 - `PhotoSource.kt`, `SmbPhotoSource.kt` : connexion au partage SMB (bibliothèque *smbj*).
+- `Updater.kt`, `ApkInstaller.kt` : mise à jour intégrée (vérification sur GitHub,
+  téléchargement, installation).
 - `PhotoRepository.kt`, `Images.kt` : ordre aléatoire, téléchargement, cache, réduction,
   rotation EXIF et flou des vignettes.

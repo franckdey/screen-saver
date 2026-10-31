@@ -23,10 +23,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
 
       - name: Compiler
+        env:
+          # numéro de version qui augmente à chaque compilation : sert à la mise à jour intégrée
+          VERSION_CODE: ${{ github.run_number }}
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
           cp app/build/outputs/apk/release/app-release.apk PhotoDream.apk
+          printf '{"versionCode": %s, "versionName": "1.%s"}\n' "$VERSION_CODE" "$VERSION_CODE" > version.json
+          cat version.json
 
       - uses: actions/upload-artifact@v5
         with:
@@ -38,6 +43,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest PhotoDream.apk \
-            --title "PhotoDream – dernière version" \
+          gh release create latest PhotoDream.apk version.json \
+            --title "PhotoDream 1.${{ github.run_number }}" \
             --notes "Compilé automatiquement depuis ${GITHUB_SHA::7}"
