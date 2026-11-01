@@ -40,6 +40,7 @@ class SettingsActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var preview: ImageView
     private lateinit var updateButton: Button
+    private lateinit var launchButton: Button
     private val updater = Updater(BuildConfig.UPDATE_BASE_URL, BuildConfig.VERSION_CODE)
     private var available: UpdateInfo? = null
     private var updating = false
@@ -68,70 +69,75 @@ class SettingsActivity : Activity() {
             topMargin = dp(16)
         })
 
-        address = field(root, "Dossier réseau (ex. smb://192.168.1.20/photo/Vacances)", prefs.address)
-        user = field(root, "Utilisateur (laisser vide pour un accès invité)", prefs.user)
-        password = field(root, "Mot de passe", prefs.password, secret = true)
-        domain = field(root, "Domaine / groupe de travail (généralement vide)", prefs.domain)
-
-        recursive = check(root, "Inclure les sous-dossiers", prefs.recursive)
-        showFolder = check(root, "Afficher le lieu et la date sur la photo (sinon son dossier et son nom)", prefs.showFolder)
-        showClock = check(root, "Afficher l'heure", prefs.showClock)
-
-        root.addView(cycler("Durée en plein écran", listOf(5, 8, 12, 20, 30), prefs.holdSeconds, { "$it s" }) {
-            prefs.holdSeconds = it
-        })
-        root.addView(cycler("Durée par photo dans le diaporama simple", listOf(3, 5, 8, 10, 15, 30), prefs.simpleSeconds, { "$it s" }) {
-            prefs.simpleSeconds = it
-        })
-        root.addView(cycler("Économiseur d'écran", listOf(false, true), prefs.simpleScreensaver, {
-            if (it) "diaporama simple" else "mosaïque animée"
-        }) { prefs.simpleScreensaver = it })
-        root.addView(cycler("Densité des vignettes (plus = plus petites)", listOf(3, 4, 5, 6), prefs.rows, { "$it" }) {
-            prefs.rows = it
-        })
-        root.addView(cycler("Flou de l'arrière-plan", listOf(0, 1, 2), prefs.blurLevel, {
-            listOf("aucun", "léger", "fort")[it]
-        }) { prefs.blurLevel = it })
-        root.addView(cycler("Taille du cache sur la TV", listOf(200, 500, 1000, 2000), prefs.cacheMb, { "$it Mo" }) {
-            prefs.cacheMb = it
-        })
-
-        val buttons = LinearLayout(this).apply {
-            orientation = if (narrow) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
-            setPadding(0, dp(16), 0, 0)
-        }
-        buttons.addView(button("Tester la connexion") { testConnection() })
-        buttons.addView(button("Lancer le diaporama") {
+        // Partie haute : lancer le diaporama et régler son allure.
+        val top = section(root, "Diaporama")
+        val launch = row(narrow)
+        launch.addView(button("Lancer le diaporama") {
             save()
             startActivity(Intent(this, SlideshowActivity::class.java))
-        })
-        buttons.addView(button("Lancer le diaporama simple") {
+        }.also { launchButton = it })
+        launch.addView(button("Lancer le diaporama simple") {
             save()
             startActivity(Intent(this, SlideshowActivity::class.java).putExtra(SlideshowActivity.EXTRA_SIMPLE, true))
         })
-        buttons.addView(button("Choisir comme économiseur") { openDreamSettings() })
-        buttons.addView(button("Tester une photo") { testOnePhoto() })
-        buttons.addView(button("Vider le cache") {
+        launch.addView(button("Choisir comme économiseur") { openDreamSettings() })
+        top.addView(launch)
+
+        top.addView(cycler("Économiseur d'écran", listOf(false, true), prefs.simpleScreensaver, {
+            if (it) "diaporama simple" else "mosaïque animée"
+        }) { prefs.simpleScreensaver = it })
+        top.addView(cycler("Durée en plein écran", listOf(5, 8, 12, 20, 30), prefs.holdSeconds, { "$it s" }) {
+            prefs.holdSeconds = it
+        })
+        top.addView(cycler("Durée par photo dans le diaporama simple", listOf(3, 5, 8, 10, 15, 30), prefs.simpleSeconds, { "$it s" }) {
+            prefs.simpleSeconds = it
+        })
+        top.addView(cycler("Densité des vignettes (plus = plus petites)", listOf(3, 4, 5, 6), prefs.rows, { "$it" }) {
+            prefs.rows = it
+        })
+        top.addView(cycler("Flou de l'arrière-plan", listOf(0, 1, 2), prefs.blurLevel, {
+            listOf("aucun", "léger", "fort")[it]
+        }) { prefs.blurLevel = it })
+        showFolder = check(top, "Afficher le lieu et la date sur la photo (sinon son dossier et son nom)", prefs.showFolder)
+        showClock = check(top, "Afficher l'heure", prefs.showClock)
+
+        // Partie basse : le dossier réseau, les identifiants et les tests.
+        val bottom = section(root, "Dossier réseau et tests")
+        address = field(bottom, "Dossier réseau (ex. smb://192.168.1.20/photo/Vacances)", prefs.address)
+        user = field(bottom, "Utilisateur (laisser vide pour un accès invité)", prefs.user)
+        password = field(bottom, "Mot de passe", prefs.password, secret = true)
+        domain = field(bottom, "Domaine / groupe de travail (généralement vide)", prefs.domain)
+        recursive = check(bottom, "Inclure les sous-dossiers", prefs.recursive)
+        bottom.addView(cycler("Taille du cache sur la TV", listOf(200, 500, 1000, 2000), prefs.cacheMb, { "$it Mo" }) {
+            prefs.cacheMb = it
+        })
+
+        val tests = row(narrow)
+        tests.addView(button("Tester la connexion") { testConnection() })
+        tests.addView(button("Tester une photo") { testOnePhoto() })
+        tests.addView(button("Vider le cache") {
             PhotoRepository(this, prefs).clearCache()
             status.text = "Cache vidé."
         })
-        buttons.addView(button("Rechercher une mise à jour") { checkUpdate(manual = true) })
-        root.addView(buttons)
+        tests.addView(button("Rechercher une mise à jour") { checkUpdate(manual = true) })
+        bottom.addView(tests)
 
+        // résultat des tests, juste sous leurs boutons
         status = text("", 16f).apply { setPadding(0, dp(16), 0, 0) }
-        root.addView(status)
+        bottom.addView(status)
         preview = ImageView(this).apply {
             adjustViewBounds = true
             visibility = View.GONE
             setPadding(0, dp(12), 0, 0)
         }
-        root.addView(preview, LinearLayout.LayoutParams(dp(480), LinearLayout.LayoutParams.WRAP_CONTENT))
+        bottom.addView(preview, LinearLayout.LayoutParams(dp(480), LinearLayout.LayoutParams.WRAP_CONTENT))
 
         setContentView(ScrollView(this).apply {
             setBackgroundColor(Color.rgb(18, 24, 32))
             addView(root)
         })
-        address.requestFocus()
+        // dossier pas encore réglé : on commence par l'adresse, sinon par « Lancer le diaporama »
+        if (prefs.address.isBlank()) address.requestFocus() else launchButton.requestFocus()
         checkUpdate(manual = false)
     }
 
@@ -268,6 +274,26 @@ class SettingsActivity : Activity() {
         textSize = sizeSp
         setTextColor(Color.WHITE)
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+    }
+
+    /** Un bloc encadré avec son titre, pour séparer l'écran en parties. */
+    private fun section(root: LinearLayout, title: String): LinearLayout {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(16))
+            setBackgroundColor(Color.rgb(30, 38, 50))
+        }
+        box.addView(text(title, 20f, bold = true))
+        root.addView(box, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(20)
+        })
+        return box
+    }
+
+    /** Boutons côte à côte (les uns sous les autres sur un téléphone). */
+    private fun row(narrow: Boolean) = LinearLayout(this).apply {
+        orientation = if (narrow) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        setPadding(0, dp(8), 0, dp(8))
     }
 
     private fun field(root: LinearLayout, label: String, value: String, secret: Boolean = false): EditText {
