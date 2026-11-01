@@ -80,6 +80,12 @@ class SettingsActivity : Activity() {
         root.addView(cycler("Durée en plein écran", listOf(5, 8, 12, 20, 30), prefs.holdSeconds, { "$it s" }) {
             prefs.holdSeconds = it
         })
+        root.addView(cycler("Durée par photo dans le diaporama simple", listOf(3, 5, 8, 10, 15, 30), prefs.simpleSeconds, { "$it s" }) {
+            prefs.simpleSeconds = it
+        })
+        root.addView(cycler("Économiseur d'écran", listOf(false, true), prefs.simpleScreensaver, {
+            if (it) "diaporama simple" else "mosaïque animée"
+        }) { prefs.simpleScreensaver = it })
         root.addView(cycler("Densité des vignettes (plus = plus petites)", listOf(3, 4, 5, 6), prefs.rows, { "$it" }) {
             prefs.rows = it
         })
@@ -98,6 +104,10 @@ class SettingsActivity : Activity() {
         buttons.addView(button("Lancer le diaporama") {
             save()
             startActivity(Intent(this, SlideshowActivity::class.java))
+        })
+        buttons.addView(button("Lancer le diaporama simple") {
+            save()
+            startActivity(Intent(this, SlideshowActivity::class.java).putExtra(SlideshowActivity.EXTRA_SIMPLE, true))
         })
         buttons.addView(button("Choisir comme économiseur") { openDreamSettings() })
         buttons.addView(button("Tester une photo") { testOnePhoto() })

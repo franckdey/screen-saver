@@ -11,7 +11,9 @@ import android.view.WindowManager
 
 /**
  * Le même diaporama, lancé à la main depuis l'appli.
- * OK ou un appui sur l'écran fixe la photo / relance, flèche droite = suivante, flèche gauche = précédente, Retour pour quitter.
+ * OK ou un appui sur l'écran fixe la photo / relance, flèche droite = suivante, flèche gauche = précédente,
+ * Retour pour quitter. Avec [EXTRA_SIMPLE], c'est le diaporama simple (photos entières, dossier par
+ * dossier) : un appui sur le tiers gauche ou droit de l'écran recule ou avance.
  */
 class SlideshowActivity : Activity() {
     private var slideshow: SlideshowView? = null
@@ -19,9 +21,9 @@ class SlideshowActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        val view = SlideshowView(this)
+        val view = SlideshowView(this, simple = intent.getBooleanExtra(EXTRA_SIMPLE, false))
         slideshow = view
-        view.setOnClickListener { view.togglePause() }
+        // les appuis sur l'écran sont gérés par la vue elle-même (pause, gauche / droite)
         view.isFocusable = false // les touches de la télécommande passent par onKeyDown, pas par le clic
         setContentView(view)
     }
@@ -65,5 +67,10 @@ class SlideshowActivity : Activity() {
             }
         }
         return super.onKeyDown(keyCode, event)
+    }
+
+    companion object {
+        /** Lancer le diaporama simple plutôt que la mosaïque. */
+        const val EXTRA_SIMPLE = "simple"
     }
 }
