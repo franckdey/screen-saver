@@ -37,6 +37,21 @@ class Prefs(context: Context) {
         get() = sp.getInt("hold", 8)
         set(v) = sp.edit().putInt("hold", v).apply()
 
+    /** Temps par photo dans le diaporama simple, en secondes. */
+    var simpleSeconds: Int
+        get() = sp.getInt("simpleHold", 5)
+        set(v) = sp.edit().putInt("simpleHold", v).apply()
+
+    /** Dernière photo montrée par le diaporama simple, pour reprendre au même endroit. */
+    var simpleLast: String
+        get() = sp.getString("simpleLast", "") ?: ""
+        set(v) = sp.edit().putString("simpleLast", v).apply()
+
+    /** Économiseur d'écran : false = mosaïque animée, true = diaporama simple. */
+    var simpleScreensaver: Boolean
+        get() = sp.getBoolean("simpleScreensaver", false)
+        set(v) = sp.edit().putBoolean("simpleScreensaver", v).apply()
+
     /** Densité de la mosaïque : plus la valeur est grande, plus les vignettes sont petites. */
     var rows: Int
         get() = sp.getInt("rows", 4)

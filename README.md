@@ -153,6 +153,28 @@ Les dossiers techniques (`@eaDir` de Synology, `#recycle`, fichiers cachés) son
 
 Sur téléphone, un appui sur l'écran fixe ou relance la photo.
 
+### Diaporama simple
+
+Au lieu de la mosaïque animée, PhotoDream peut montrer un **diaporama simple** : les photos
+entières en plein écran, l'une après l'autre, dossier par dossier et par nom, avec un fondu
+rapide entre deux photos.
+
+- Bouton **« Lancer le diaporama simple »** dans les réglages, à côté de « Lancer le diaporama ».
+- Réglage **« Économiseur d'écran : mosaïque animée / diaporama simple »** pour choisir ce que
+  l'économiseur affiche.
+- Réglage **« Durée par photo dans le diaporama simple »** (3 à 30 s, 5 s par défaut).
+
+| Touche ou appui | Effet |
+|---|---|
+| Flèche droite, ou appui sur le tiers droit de l'écran | photo suivante |
+| Flèche gauche, ou appui sur le tiers gauche de l'écran | photo précédente |
+| OK, ou appui au milieu de l'écran | pause / reprise |
+| Retour | quitte |
+
+Le diaporama reprend là où il s'était arrêté la fois précédente. Le lieu et la date (ou le
+dossier et le nom) s'affichent en bas à gauche, la position (« 12 / 340 ») en bas à droite.
+Les photos regardées comptent comme vues pour la mosaïque, comme d'habitude.
+
 ---
 
 ## 4. Choisir PhotoDream comme économiseur d'écran
@@ -241,6 +263,7 @@ En local : `./gradlew testDebugUnitTest` (les tests Samba sont ignorés sans la 
 
 - `SlideshowView.kt` : le dessin de l'animation (vignettes, zoom, cadre, textes).
 - `Timeline.kt` : le déroulé de chaque photo, la pause et la reprise (sans dessin, testé).
+- `PhotoPlayer.kt` : l'ordre et la minuterie du diaporama simple (sans dessin, testé).
 - `PhotoDreamService.kt` : l'économiseur d'écran Android (*DreamService*).
 - `SlideshowActivity.kt` : le diaporama lancé à la main.
 - `SettingsActivity.kt` : l'écran de réglages pour la télécommande.

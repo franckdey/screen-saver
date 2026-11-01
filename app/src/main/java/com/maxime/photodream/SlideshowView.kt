@@ -13,6 +13,8 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import android.os.SystemClock
 import android.text.format.DateFormat
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.View
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
@@ -28,9 +30,12 @@ import kotlin.math.pow
  * Le diaporama façon Windows Media Center : des vignettes floutées qui dérivent lentement
  * dans tous les sens, et une photo à la fois qui sort de la mosaïque, grandit jusqu'au plein écran,
  * reste affichée quelques secondes puis retourne à sa place.
+ *
+ * Avec [simple], c'est un diaporama simple à la place : les photos entières en plein écran,
+ * dossier par dossier, une toutes les N secondes, gauche / droite pour reculer ou avancer.
  */
 @SuppressLint("ViewConstructor")
-class SlideshowView(context: Context) : View(context) {
+class SlideshowView(context: Context, private val simple: Boolean = false) : View(context) {
 
     private val prefs = Prefs(context)
     private val repo = PhotoRepository(context, prefs)
@@ -93,6 +98,20 @@ class SlideshowView(context: Context) : View(context) {
     /** Change à chaque chargement lancé : un chargement dépassé ne remplace pas le nouveau. */
     private var loadGen = 0
 
+    // --- Diaporama simple ---------------------------------------------------------------------
+
+    /** Ordre et minuterie du diaporama simple, une fois la liste des photos lue. */
+    private var player: PhotoPlayer? = null
+    /** Photo affichée, et la précédente pendant le fondu enchaîné. */
+    private var simpleShown: LoadedPhoto? = null
+    private var simpleFading: LoadedPhoto? = null
+    private var simpleFadeStart = 0L
+    /** Photos déjà chargées (l'actuelle et ses voisines, pour naviguer sans attendre). */
+    private val simpleCache = HashMap<RemotePhoto, LoadedPhoto>()
+    private val simpleLoading = HashSet<RemotePhoto>()
+    /** Photos illisibles d'affilée : au-delà du nombre de photos, on abandonne. */
+    private var simpleFailures = 0
+
     private var status: String? = "Lecture du dossier réseau… (un gros dossier peut prendre un moment)"
     private var notice: String? = null
     private var noticeUntil = 0L
@@ -123,8 +142,34 @@ class SlideshowView(context: Context) : View(context) {
     private val frameRect = RectF()
     private val matrix = Matrix()
 
+    /** Sur un écran tactile : appui = pause, et dans le diaporama simple, gauche / droite pour reculer ou avancer. */
+    private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDown(e: MotionEvent) = true
+
+        override fun onSingleTapUp(e: MotionEvent): Boolean {
+            performClick()
+            tap(e.x)
+            return true
+        }
+    })
+
     init {
         setBackgroundColor(Color.BLACK)
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent): Boolean = gestures.onTouchEvent(event)
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
+    }
+
+    /** Appui à l'écran : dans le diaporama simple, le tiers gauche recule et le tiers droit avance. */
+    private fun tap(x: Float) {
+        if (simple && x < width / 3f) previous()
+        else if (simple && x > width * 2f / 3f) skip()
+        else togglePause()
     }
 
     override fun onAttachedToWindow() {
@@ -155,8 +200,10 @@ class SlideshowView(context: Context) : View(context) {
         if (repo.offline) {
             showNotice("NAS injoignable, photos déjà en cache (${repo.lastError})", 10_000)
         }
-        scope?.launch { fillMosaic() }
-        requestNext()
+        if (simple) startSimple() else {
+            scope?.launch { fillMosaic() }
+            requestNext()
+        }
         // démarré sur la liste mémorisée : on la remet à jour sans interrompre le diaporama
         if (repo.usedSavedListing) scope?.launch { repo.refresh() }
     }
@@ -211,6 +258,11 @@ class SlideshowView(context: Context) : View(context) {
 
     /** Fixe la photo affichée (ou la prochaine) en plein écran, ou relance le défilement. */
     fun togglePause() {
+        player?.let { f ->
+            f.togglePause(SystemClock.uptimeMillis())
+            showNotice(if (f.paused) "Pause (OK pour reprendre)" else "Reprise du diaporama", 2_500)
+            return
+        }
         timeline.togglePause(SystemClock.uptimeMillis())
         showNotice(
             if (timeline.paused) "Photo fixée pendant 1 minute (OK pour reprendre avant)" else "Reprise du défilement",
@@ -219,10 +271,19 @@ class SlideshowView(context: Context) : View(context) {
     }
 
     /** Passe tout de suite à la photo suivante. */
-    fun skip() = timeline.skip()
+    fun skip() {
+        val f = player ?: return timeline.skip()
+        f.next()
+        simpleEnsure()
+    }
 
     /** Revient à la photo précédente ; chaque appui remonte d'une photo de plus. */
     fun previous() {
+        player?.let { f ->
+            f.previous()
+            simpleEnsure()
+            return
+        }
         if (!listed) return
         val pending = nextIndex.takeIf { it >= 0 && (next != null || loadingNext) }
         // sans photo à l'écran, la « précédente » est celle qui vient de repartir
@@ -255,6 +316,65 @@ class SlideshowView(context: Context) : View(context) {
                 nextIndex = -1
                 showNotice("Impossible de recharger cette photo : " + (repo.lastError ?: "raison inconnue"), 5_000)
             }
+        }
+    }
+
+    /** Démarre le diaporama simple, là où le précédent s'était arrêté. */
+    private fun startSimple() {
+        val list = repo.orderedPhotos()
+        if (list.isEmpty()) return
+        val last = prefs.simpleLast
+        val start = list.indexOfFirst { it.path == last }.coerceAtLeast(0)
+        player = PhotoPlayer(list, start, prefs.simpleSeconds * 1000L)
+        if (start > 0) showNotice("Reprise à la photo ${start + 1} sur ${list.size}", 4_000)
+        simpleEnsure()
+    }
+
+    /** Affiche la photo voulue si elle est prête, sinon la charge ; prépare aussi ses voisines. */
+    private fun simpleEnsure() {
+        val f = player ?: return
+        val wanted = f.current
+        if (simpleShown?.photo != wanted) {
+            simpleCache[wanted]?.let { simpleDisplay(it) } ?: simpleLoad(wanted)
+        }
+        if (simpleShown?.photo == wanted) {
+            simpleLoad(f.peekNext())
+            simpleLoad(f.peekPrevious())
+        }
+        // on ne garde en mémoire que la photo affichée et ses deux voisines
+        val keep = setOf(wanted, f.peekNext(), f.peekPrevious())
+        simpleCache.keys.retainAll(keep)
+    }
+
+    private fun simpleDisplay(photo: LoadedPhoto) {
+        // on retient la position pour reprendre au même endroit la prochaine fois
+        photo.photo?.let { prefs.simpleLast = it.path }
+        val now = SystemClock.uptimeMillis()
+        simpleFading = simpleShown
+        simpleShown = photo
+        simpleFadeStart = now
+        simpleFailures = 0
+        player?.shown(now)
+    }
+
+    private fun simpleLoad(photo: RemotePhoto) {
+        val s = scope ?: return
+        if (photo in simpleCache || !simpleLoading.add(photo)) return
+        s.launch {
+            val loaded = repo.loadFull(photo)
+            simpleLoading.remove(photo)
+            val f = player ?: return@launch
+            if (loaded != null) {
+                simpleCache[photo] = loaded
+            } else if (photo == f.current) {
+                // photo illisible : on passe à la suivante, sans boucler sans fin
+                if (++simpleFailures >= f.photos.size) {
+                    status = "Impossible de charger les photos : " + (repo.lastError ?: "raison inconnue")
+                    return@launch
+                }
+                f.next()
+            }
+            simpleEnsure()
         }
     }
 
@@ -377,7 +497,13 @@ class SlideshowView(context: Context) : View(context) {
         lastFrame = now
         canvas.drawColor(Color.BLACK)
 
-        if (tiles.isNotEmpty()) {
+        val f = player
+        if (simple) {
+            if (f != null) {
+                if (f.update(now)) simpleEnsure()
+                drawSimple(canvas, f, now)
+            }
+        } else if (tiles.isNotEmpty()) {
             move(dt, now)
             updatePhase(now)
             val zoom = drawPhotoParams(now)
@@ -561,6 +687,41 @@ class SlideshowView(context: Context) : View(context) {
         canvas.restore()
     }
 
+    /** Diaporama simple : la photo entière en plein écran, en fondu enchaîné avec la précédente. */
+    private fun drawSimple(canvas: Canvas, f: PhotoPlayer, now: Long) {
+        val shown = simpleShown
+        val fade = ((now - simpleFadeStart) / SIMPLE_FADE_MS.toFloat()).coerceIn(0f, 1f)
+        if (fade >= 1f) simpleFading = null
+        simpleFading?.let { drawFitted(canvas, it.full, 1f - fade) }
+        if (shown == null) {
+            if (status == null) drawText(canvas, "Chargement…", width / 2f, height / 2f, 0.8f, Paint.Align.CENTER)
+            return
+        }
+        drawFitted(canvas, shown.full, fade)
+        // légende (lieu et date, ou dossier et nom) et position dans la liste
+        val size = labelSize
+        val normal = textPaint.textSize
+        textPaint.textSize = size
+        val bottom = height - size * 1.2f
+        if (prefs.showFolder && shown.label.isNotEmpty()) {
+            drawText(canvas, shown.label, size * 1.2f, bottom, 0.9f * fade, Paint.Align.LEFT)
+        }
+        val position = if (f.paused) "Pause · ${f.index + 1} / ${f.photos.size}" else "${f.index + 1} / ${f.photos.size}"
+        drawText(canvas, position, width - size * 1.2f, bottom, 0.8f, Paint.Align.RIGHT)
+        textPaint.textSize = normal
+    }
+
+    private fun drawFitted(canvas: Canvas, bmp: Bitmap, alpha: Float) {
+        if (alpha <= 0f) return
+        val bw = bmp.width.toFloat()
+        val bh = bmp.height.toFloat()
+        val fit = min(width / bw, height / bh)
+        centered(photoRect, width / 2f, height / 2f, bw * fit, bh * fit)
+        bitmapPaint.alpha = (255 * alpha).toInt()
+        canvas.drawBitmap(bmp, null, photoRect, bitmapPaint)
+        bitmapPaint.alpha = 255
+    }
+
     private fun drawOverlays(canvas: Canvas, now: Long) {
         status?.let {
             drawText(canvas, it, width / 2f, height / 2f, 1f, Paint.Align.CENTER)
@@ -604,6 +765,7 @@ class SlideshowView(context: Context) : View(context) {
 
     companion object {
         private const val TILE_FADE_MS = 700L
+        private const val SIMPLE_FADE_MS = 500L
         private const val MAX_POOL = 120
     }
 }

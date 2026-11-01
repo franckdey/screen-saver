@@ -182,7 +182,17 @@ class PhotoRepository(
     suspend fun loadPhoto(photo: RemotePhoto, blurLevel: Int): LoadedPhoto? =
         withContext(Dispatchers.IO) { load(photo, blurLevel) }
 
-    private suspend fun load(photo: RemotePhoto, blurLevel: Int): LoadedPhoto? {
+    /**
+     * Charge une photo pour le diaporama simple : pas de vignette floutée à préparer.
+     * Elle compte comme vue, comme dans le diaporama habituel.
+     */
+    suspend fun loadFull(photo: RemotePhoto): LoadedPhoto? =
+        withContext(Dispatchers.IO) { load(photo, 0, withTile = false) }
+
+    /** Toutes les photos, dossier par dossier et par nom, pour le diaporama simple. */
+    fun orderedPhotos(): List<RemotePhoto> = PhotoPlayer.ordered(photos)
+
+    private suspend fun load(photo: RemotePhoto, blurLevel: Int, withTile: Boolean = true): LoadedPhoto? {
         val file = localFile(photo) ?: run {
             markSeen(photo) // illisible : on la saute pour ce tour au lieu de la redemander
             return null
@@ -195,7 +205,7 @@ class PhotoRepository(
         }
         val label = caption(photo, file)
         markSeen(photo)
-        return LoadedPhoto(full, Images.makeTile(full, blurLevel), label, photo)
+        return LoadedPhoto(full, if (withTile) Images.makeTile(full, blurLevel) else full, label, photo)
     }
 
     /** Vrai si la photo a déjà été montrée en grand pendant ce tour. */
