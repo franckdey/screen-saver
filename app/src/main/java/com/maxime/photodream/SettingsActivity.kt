@@ -5,12 +5,14 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -136,6 +138,7 @@ class SettingsActivity : Activity() {
             setBackgroundColor(Color.rgb(18, 24, 32))
             addView(root)
         })
+        highlightFocus(root)
         // dossier pas encore réglé : on commence par l'adresse, sinon par « Lancer le diaporama »
         if (prefs.address.isBlank()) address.requestFocus() else launchButton.requestFocus()
         checkUpdate(manual = false)
@@ -274,6 +277,27 @@ class SettingsActivity : Activity() {
         textSize = sizeSp
         setTextColor(Color.WHITE)
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+    }
+
+    /**
+     * Rend bien visible l'élément sélectionné à la télécommande : épais cadre jaune et fond
+     * légèrement teinté, posés par-dessus (le style d'origine du bouton est conservé).
+     */
+    private fun highlightFocus(view: View) {
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) highlightFocus(view.getChildAt(i))
+            return
+        }
+        if (!view.isFocusable) return
+        val frame = GradientDrawable().apply {
+            setColor(Color.argb(60, 255, 193, 7))
+            setStroke(dp(4), Color.rgb(255, 193, 7))
+            cornerRadius = dp(6).toFloat()
+        }
+        view.setOnFocusChangeListener { v, hasFocus ->
+            v.foreground = if (hasFocus) frame else null
+        }
+        if (view.isFocused) view.foreground = frame
     }
 
     /** Un bloc encadré avec son titre, pour séparer l'écran en parties. */
