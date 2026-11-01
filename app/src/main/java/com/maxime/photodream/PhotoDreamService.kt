@@ -5,7 +5,7 @@ import android.view.KeyEvent
 
 /**
  * L'économiseur d'écran proprement dit, lancé par Android TV après l'inactivité.
- * OK fixe la photo / relance, flèche droite passe à la suivante,
+ * OK fixe la photo / relance, flèche droite passe à la suivante, flèche gauche revient à la précédente,
  * toute autre touche quitte l'économiseur comme d'habitude.
  */
 class PhotoDreamService : DreamService() {
@@ -13,7 +13,7 @@ class PhotoDreamService : DreamService() {
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        isInteractive = true // pour recevoir les touches OK et flèche droite
+        isInteractive = true // pour recevoir les touches OK et flèches gauche et droite
         isFullscreen = true
         isScreenBright = true
         view = SlideshowView(this).also { setContentView(it) }
@@ -28,6 +28,10 @@ class PhotoDreamService : DreamService() {
             }
             KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_NEXT -> {
                 if (event.action == KeyEvent.ACTION_UP) v.skip()
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                if (event.action == KeyEvent.ACTION_UP) v.previous()
                 return true
             }
         }
