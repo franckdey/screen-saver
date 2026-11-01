@@ -111,7 +111,10 @@ Ensuite il suffit de confirmer l'installation. Les réglages sont conservés.
 
 ## 3. Configurer
 
-Ouvrir **PhotoDream** depuis l'écran d'accueil de la TV (rangée des applis) :
+Ouvrir **PhotoDream** depuis l'écran d'accueil de la TV (rangée des applis). L'écran est
+en deux parties : en haut **Diaporama** (boutons de lancement, durées, densité, flou, légende,
+heure), en bas **Dossier réseau et tests** (adresse, identifiants, sous-dossiers, cache et
+boutons de test). Le dossier réseau se règle ainsi :
 
 | Réglage | Exemple |
 |---|---|
