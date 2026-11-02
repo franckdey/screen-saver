@@ -14,6 +14,7 @@ import android.graphics.Typeface
 import android.os.SystemClock
 import android.text.format.DateFormat
 import android.view.GestureDetector
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import kotlinx.coroutines.CoroutineScope
@@ -98,6 +99,25 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
     /** Change à chaque chargement lancé : un chargement dépassé ne remplace pas le nouveau. */
     private var loadGen = 0
 
+    // --- Choix d'une photo dans la mosaïque figée (flèche bas) -----------------------------
+
+    /** Mosaïque figée : un cadre jaune se déplace aux flèches, OK agrandit la photo choisie. */
+    private var selecting = false
+    private var cursor: Tile? = null
+    /** Photo choisie, affichée en grand jusqu'au prochain appui. */
+    private var viewer: LoadedPhoto? = null
+    private var viewerTile: Tile? = null
+    private var viewerLoading = false
+    private var viewerClosing = false
+    private var viewerFrom = 0f
+    private var viewerStart = 0L
+    private var pickGen = 0
+    private var lastKeyAt = 0L
+    private val cursorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.rgb(255, 204, 0)
+    }
+
     // --- Diaporama simple ---------------------------------------------------------------------
 
     /** Ordre et minuterie du diaporama simple, une fois la liste des photos lue. */
@@ -148,8 +168,16 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
 
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             performClick()
-            tap(e.x)
+            tap(e.x, e.y)
             return true
+        }
+
+        /** Appui long : fige la mosaïque pour choisir une photo du bout du doigt. */
+        override fun onLongPress(e: MotionEvent) {
+            if (!simple && !selecting) {
+                enterSelection()
+                tileAt(e.x, e.y)?.let { cursor = it }
+            }
         }
     })
 
@@ -166,7 +194,18 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
     }
 
     /** Appui à l'écran : dans le diaporama simple, le tiers gauche recule et le tiers droit avance. */
-    private fun tap(x: Float) {
+    private fun tap(x: Float, y: Float) {
+        lastKeyAt = SystemClock.uptimeMillis()
+        if (selecting) {
+            when {
+                viewer != null || viewerLoading -> closeViewer()
+                else -> tileAt(x, y)?.let {
+                    cursor = it
+                    openCursor()
+                } ?: exitSelection() // appui à côté des vignettes : on reprend le diaporama
+            }
+            return
+        }
         if (simple && x < width / 3f) previous()
         else if (simple && x > width * 2f / 3f) skip()
         else togglePause()
@@ -268,6 +307,144 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
             if (timeline.paused) "Photo fixée pendant 1 minute (OK pour reprendre avant)" else "Reprise du défilement",
             3_000,
         )
+    }
+
+    /**
+     * Une touche de la télécommande. Renvoie faux si elle ne sert pas ici (l'économiseur se ferme alors).
+     * Flèche bas fige la mosaïque pour choisir une photo ; Retour la remet en mouvement.
+     */
+    fun handleKey(code: Int): Boolean {
+        lastKeyAt = SystemClock.uptimeMillis()
+        if (selecting) {
+            val viewing = viewer != null || viewerLoading
+            when (code) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> if (viewing) closeViewer() else moveCursor(-1, 0)
+                KeyEvent.KEYCODE_DPAD_RIGHT -> if (viewing) closeViewer() else moveCursor(1, 0)
+                KeyEvent.KEYCODE_DPAD_UP -> if (viewing) closeViewer() else moveCursor(0, -1)
+                KeyEvent.KEYCODE_DPAD_DOWN -> if (viewing) closeViewer() else moveCursor(0, 1)
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER ->
+                    if (viewing) closeViewer() else openCursor()
+                KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ->
+                    if (viewing) closeViewer() else exitSelection()
+                else -> return false
+            }
+            return true
+        }
+        when (code) {
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> togglePause()
+            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_NEXT -> skip()
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> previous()
+            KeyEvent.KEYCODE_DPAD_DOWN -> if (simple) return false else enterSelection()
+            else -> return false
+        }
+        return true
+    }
+
+    private fun enterSelection() {
+        if (!listed || tiles.isEmpty() || selecting) return
+        val now = SystemClock.uptimeMillis()
+        selecting = true
+        lastKeyAt = now
+        // la photo déjà agrandie reste affichée : on la garde, Retour ou OK la renvoie dans la mosaïque
+        val shown = current
+        val shownTile = currentTile
+        if (shown != null && shownTile != null && fgZoom > 0f) {
+            viewer = shown
+            viewerTile = shownTile
+            viewerFrom = fgZoom
+            viewerStart = now
+            viewerClosing = false
+        }
+        current = null
+        currentTile = null
+        cursor = shownTile ?: selectable().minByOrNull { t ->
+            val dx = t.x + t.w / 2 - width / 2f
+            val dy = t.y + t.h / 2 - height / 2f
+            dx * dx + dy * dy
+        }
+        showNotice("Flèches : choisir une photo · OK : l'agrandir · Retour : reprendre", 6_000)
+    }
+
+    private fun exitSelection() {
+        selecting = false
+        pickGen++
+        viewer = null
+        viewerTile = null
+        viewerLoading = false
+        cursor = null
+        timeline.reset(SystemClock.uptimeMillis())
+        showNotice("Reprise du défilement", 2_500)
+    }
+
+    /** Les vignettes qu'on peut choisir : avec une photo, et dont le centre est à l'écran. */
+    private fun selectable() = tiles.filter { t ->
+        val cx = t.x + t.w / 2
+        val cy = t.y + t.h / 2
+        t.photo != null && t.bitmap != null && cx in 0f..width.toFloat() && cy in 0f..height.toFloat()
+    }
+
+    private fun moveCursor(dx: Int, dy: Int) {
+        val from = cursor
+        val fromX = from?.let { it.x + it.w / 2 } ?: (width / 2f)
+        val fromY = from?.let { it.y + it.h / 2 } ?: (height / 2f)
+        val candidates = selectable().filter { it !== from }
+        val i = Neighbors.pick(fromX, fromY, candidates.map { (it.x + it.w / 2) to (it.y + it.h / 2) }, dx, dy)
+        if (i != null) cursor = candidates[i]
+    }
+
+    /** La vignette sous le doigt (celle du dessus si elles se chevauchent). */
+    private fun tileAt(x: Float, y: Float): Tile? =
+        selectable().lastOrNull { x >= it.x && x <= it.x + it.w && y >= it.y && y <= it.y + it.h }
+
+    private fun openCursor() {
+        val tile = cursor ?: return
+        val photo = tile.photo ?: return
+        val s = scope ?: return
+        val gen = ++pickGen
+        viewerLoading = true
+        showNotice("Chargement de la photo…", 20_000)
+        s.launch {
+            val loaded = repo.loadPhoto(photo, blurLevel)
+            if (gen != pickGen || !selecting) return@launch
+            viewerLoading = false
+            if (loaded == null) {
+                showNotice("Impossible de charger cette photo : " + (repo.lastError ?: "raison inconnue"), 5_000)
+                return@launch
+            }
+            notice = null
+            viewer = loaded
+            viewerTile = tile
+            viewerFrom = 0f
+            viewerStart = SystemClock.uptimeMillis()
+            viewerClosing = false
+        }
+    }
+
+    private fun closeViewer() {
+        if (viewerLoading) {
+            pickGen++
+            viewerLoading = false
+            notice = null
+            return
+        }
+        if (viewer == null || viewerClosing) return
+        val now = SystemClock.uptimeMillis()
+        viewerFrom = viewerZoom(now)
+        viewerStart = now
+        viewerClosing = true
+    }
+
+    /** Agrandissement de la photo choisie : de [viewerFrom] au plein écran, ou retour à sa vignette. */
+    private fun viewerZoom(now: Long): Float {
+        val t = ((now - viewerStart) / VIEWER_ZOOM_MS.toFloat()).coerceIn(0f, 1f)
+        if (!viewerClosing) return viewerFrom + (1f - viewerFrom) * Timeline.ease(t)
+        if (t >= 1f) {
+            viewer = null
+            viewerTile = null
+            viewerClosing = false
+            return 0f
+        }
+        return viewerFrom * (1f - Timeline.ease(t))
     }
 
     /** Passe tout de suite à la photo suivante. */
@@ -503,6 +680,18 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
                 if (f.update(now)) simpleEnsure()
                 drawSimple(canvas, f, now)
             }
+        } else if (tiles.isNotEmpty() && selecting) {
+            // mosaïque figée : rien ne bouge, le cadre jaune montre la vignette choisie
+            if (now - lastKeyAt > SELECT_IDLE_MS) exitSelection()
+            drawMosaic(canvas, now)
+            val zoom = if (viewer != null) viewerZoom(now) else 0f
+            dimPaint.alpha = (255 * (0.1f + 0.65f * zoom)).toInt()
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), dimPaint)
+            if (zoom < 1f) drawCursor(canvas, now, 1f - zoom)
+            fgZoom = zoom
+            fgAlpha = 1f
+            fgKenBurns = 0f
+            drawPhoto(canvas, viewer, viewerTile)
         } else if (tiles.isNotEmpty()) {
             move(dt, now)
             updatePhase(now)
@@ -510,7 +699,7 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
             drawMosaic(canvas, now)
             dimPaint.alpha = (255 * (0.35f + 0.4f * zoom)).toInt()
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), dimPaint)
-            drawPhoto(canvas)
+            drawPhoto(canvas, current, currentTile)
         }
         drawOverlays(canvas, now)
         postInvalidateOnAnimation()
@@ -615,9 +804,33 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         return fgZoom
     }
 
-    private fun drawPhoto(canvas: Canvas) {
-        val photo = current ?: return
-        val tile = currentTile ?: return
+    /** La vignette choisie, bien visible au-dessus du voile sombre, avec un cadre jaune qui pulse. */
+    private fun drawCursor(canvas: Canvas, now: Long, alpha: Float) {
+        val t = cursor ?: return
+        val bmp = t.bitmap ?: return
+        val k = 1.08f
+        centered(tileRect, t.x + t.w / 2, t.y + t.h / 2, t.w * k, t.h * k)
+        canvas.save()
+        canvas.rotate(t.rotation, tileRect.centerX(), tileRect.centerY())
+        val b = tileRect.height() * 0.02f
+        frameRect.set(tileRect.left - b, tileRect.top - b, tileRect.right + b, tileRect.bottom + b)
+        framePaint.alpha = (255 * alpha).toInt()
+        canvas.drawRect(frameRect, framePaint)
+        bitmapPaint.alpha = (255 * alpha).toInt()
+        canvas.drawBitmap(bmp, null, tileRect, bitmapPaint)
+        bitmapPaint.alpha = 255
+        val pulse = 0.7f + 0.3f * kotlin.math.sin(now / 250.0).toFloat()
+        val stroke = tileRect.height() * 0.045f
+        cursorPaint.strokeWidth = stroke
+        cursorPaint.alpha = (255 * pulse * alpha).toInt()
+        frameRect.inset(-stroke / 2, -stroke / 2)
+        canvas.drawRect(frameRect, cursorPaint)
+        canvas.restore()
+    }
+
+    private fun drawPhoto(canvas: Canvas, photo: LoadedPhoto?, tile: Tile?) {
+        photo ?: return
+        tile ?: return
         if (fgAlpha <= 0f) return
         val bmp = photo.full
         val bw = bmp.width.toFloat()
@@ -767,5 +980,8 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         private const val TILE_FADE_MS = 700L
         private const val SIMPLE_FADE_MS = 500L
         private const val MAX_POOL = 120
+        private const val VIEWER_ZOOM_MS = 900L
+        /** Sans appui pendant ce temps, la mosaïque figée repart toute seule. */
+        private const val SELECT_IDLE_MS = 3 * 60_000L
     }
 }

@@ -12,6 +12,7 @@ import android.view.WindowManager
 /**
  * Le même diaporama, lancé à la main depuis l'appli.
  * OK ou un appui sur l'écran fixe la photo / relance, flèche droite = suivante, flèche gauche = précédente,
+ * flèche bas (ou appui long) fige la mosaïque pour choisir une photo à agrandir,
  * Retour pour quitter. Avec [EXTRA_SIMPLE], c'est le diaporama simple (photos entières, dossier par
  * dossier) : un appui sur le tiers gauche ou droit de l'écran recule ou avance.
  */
@@ -52,20 +53,7 @@ class SlideshowActivity : Activity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                slideshow?.togglePause()
-                return true
-            }
-            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                slideshow?.skip()
-                return true
-            }
-            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                slideshow?.previous()
-                return true
-            }
-        }
+        if (slideshow?.handleKey(keyCode) == true) return true
         return super.onKeyDown(keyCode, event)
     }
 

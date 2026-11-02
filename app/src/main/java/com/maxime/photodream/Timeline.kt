@@ -43,6 +43,14 @@ class Timeline(private val holdMs: Long) {
         pausedAt = now
     }
 
+    /** Repart de zéro, sans photo affichée : la prochaine sortira après la courte attente habituelle. */
+    fun reset(now: Long) {
+        phase = Phase.WAIT
+        phaseStart = now
+        paused = false
+        skipRequested = false
+    }
+
     /** Passe tout de suite à la photo suivante. */
     fun skip() {
         paused = false

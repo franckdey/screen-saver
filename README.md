@@ -152,9 +152,10 @@ Les dossiers techniques (`@eaDir` de Synology, `#recycle`, fichiers cachés) son
 | OK (ou Lecture/Pause) | fixe la photo en plein écran ; OK à nouveau relance le défilement, sinon il reprend tout seul au bout d'une minute |
 | Flèche droite | passe tout de suite à la photo suivante |
 | Flèche gauche | revient à la photo précédente ; chaque appui remonte d'une photo de plus, puis le diaporama reprend la suite |
+| Flèche bas | fige la mosaïque : un cadre jaune se déplace avec les quatre flèches, OK agrandit la photo choisie, OK ou Retour la renvoie dans la mosaïque, Retour reprend le diaporama (tout seul au bout de 3 minutes sans appui) |
 | Retour, Accueil ou autre touche | quitte l'économiseur |
 
-Sur téléphone, un appui sur l'écran fixe ou relance la photo.
+Sur téléphone, un appui sur l'écran fixe ou relance la photo. Un appui long fige la mosaïque : touchez alors une vignette pour l'agrandir, et touchez à côté des vignettes pour reprendre.
 
 ### Diaporama simple
 
