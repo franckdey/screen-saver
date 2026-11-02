@@ -109,14 +109,15 @@ class SettingsActivity : Activity() {
 
         // Partie basse : le dossier réseau, les identifiants et les tests.
         val bottom = section(root, "Dossier réseau et tests")
-        address = field(bottom, "Dossier réseau (ex. smb://192.168.1.20/photo/Vacances)", prefs.address)
+        address = field(bottom, "Dossier réseau (ex. smb://192.168.1.254/Freebox/etc...)", prefs.address)
         addressEnabled = check(bottom, "Utiliser ce dossier", prefs.addressEnabled)
         // autres dossiers réseau, lus en plus du premier (mêmes identifiants)
         extraBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         bottom.addView(extraBox)
         prefs.extraFolders.forEach { addExtraField(it.address, it.enabled) }
         bottom.addView(button("+ Ajouter un dossier réseau") {
-            addExtraField("", true).requestFocus()
+            // prérempli avec le dossier Photos de la Freebox : il ne reste qu'à compléter
+            addExtraField(NEW_FOLDER_PREFILL, true).apply { setSelection(text.length) }.requestFocus()
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dp(8)
         })
@@ -433,5 +434,10 @@ class SettingsActivity : Activity() {
         text = label
         isAllCaps = false
         setOnClickListener { onClick() }
+    }
+
+    companion object {
+        /** Adresse proposée pour chaque nouveau dossier réseau. */
+        const val NEW_FOLDER_PREFILL = "smb://192.168.1.254/Freebox/Photos/"
     }
 }
