@@ -34,7 +34,8 @@ class SettingsActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var address: EditText
     /** Dossiers réseau supplémentaires, un champ chacun. */
-    private val extraFields = ArrayList<EditText>()
+    private val extraFields = ArrayList<Pair<EditText, CheckBox>>()
+    private lateinit var addressEnabled: CheckBox
     private lateinit var extraBox: LinearLayout
     private lateinit var user: EditText
     private lateinit var password: EditText
@@ -109,12 +110,13 @@ class SettingsActivity : Activity() {
         // Partie basse : le dossier réseau, les identifiants et les tests.
         val bottom = section(root, "Dossier réseau et tests")
         address = field(bottom, "Dossier réseau (ex. smb://192.168.1.20/photo/Vacances)", prefs.address)
+        addressEnabled = check(bottom, "Utiliser ce dossier", prefs.addressEnabled)
         // autres dossiers réseau, lus en plus du premier (mêmes identifiants)
         extraBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         bottom.addView(extraBox)
-        prefs.extraAddresses.forEach { addExtraField(it) }
+        prefs.extraFolders.forEach { addExtraField(it.address, it.enabled) }
         bottom.addView(button("+ Ajouter un dossier réseau") {
-            addExtraField("").requestFocus()
+            addExtraField("", true).requestFocus()
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dp(8)
         })
@@ -168,7 +170,8 @@ class SettingsActivity : Activity() {
 
     private fun save() {
         prefs.address = address.text.toString()
-        prefs.extraAddresses = extraFields.map { it.text.toString() }
+        prefs.addressEnabled = addressEnabled.isChecked
+        prefs.extraFolders = extraFields.map { (edit, box) -> NetFolder(edit.text.toString(), box.isChecked) }
         prefs.user = user.text.toString()
         prefs.password = password.text.toString()
         prefs.domain = domain.text.toString()
@@ -177,13 +180,19 @@ class SettingsActivity : Activity() {
         prefs.showClock = showClock.isChecked
     }
 
-    /** Un champ pour un dossier réseau de plus, avec son bouton pour le retirer. */
-    private fun addExtraField(value: String): EditText {
+    /** Un champ pour un dossier réseau de plus, avec sa coche et son bouton pour le retirer. */
+    private fun addExtraField(value: String, enabled: Boolean): EditText {
         val block = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val edit = field(block, "Autre dossier réseau", value)
+        val line = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val box = check(line, "Utiliser ce dossier", enabled)
+        val entry = edit to box
         val remove = button("Retirer ce dossier") {
             val i = extraBox.indexOfChild(block)
-            extraFields.remove(edit)
+            extraFields.remove(entry)
             extraBox.removeView(block)
             save()
             // le focus passe au dossier suivant (ou précédent), pas en haut de l'écran
@@ -191,9 +200,12 @@ class SettingsActivity : Activity() {
             (next as? ViewGroup)?.let { g -> (0 until g.childCount).map { g.getChildAt(it) }.firstOrNull { it is EditText } }
                 ?.requestFocus() ?: address.requestFocus()
         }
-        block.addView(remove, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        line.addView(remove, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            marginStart = dp(24)
+        })
+        block.addView(line)
         extraBox.addView(block)
-        extraFields += edit
+        extraFields += entry
         highlightFocus(block)
         return edit
     }

@@ -89,7 +89,7 @@ class PhotoDiagnostic(
             onStep(lines.joinToString("\n"))
         }
 
-        val src = sourceFactory(prefs) ?: return@withContext Result("Aucun dossier réseau configuré.", null)
+        val src = sourceFactory(prefs) ?: return@withContext Result("Aucun dossier réseau configuré ou coché.", null)
         var current = "connexion"
         try {
             step("1. Lecture du dossier…")

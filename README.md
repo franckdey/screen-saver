@@ -120,6 +120,7 @@ boutons de test). Le dossier réseau se règle ainsi :
 |---|---|
 | Dossier réseau | `smb://192.168.1.20/photo/Vacances` ou `\\NAS\photo\Vacances` |
 | Autres dossiers réseau | bouton **+ Ajouter un dossier réseau**, autant que nécessaire (« Retirer ce dossier » pour en enlever un) ; leurs photos sont mélangées à celles du premier |
+| Utiliser ce dossier | coche sous chaque dossier, le premier compris : un dossier décoché est gardé dans la liste mais n'est pas lu |
 | Utilisateur | compte du NAS (vide = accès invité) |
 | Mot de passe | mot de passe de ce compte |
 | Domaine | presque toujours vide |
