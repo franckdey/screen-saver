@@ -160,4 +160,15 @@ class TimelineTest {
         // symétrique : démarre et finit en douceur
         assertEquals(1f - Timeline.ease(0.2f), Timeline.ease(0.8f), 1e-5f)
     }
+
+    @Test
+    fun `reset repart sans photo et relance la suivante apres l'attente`() {
+        advance(PAUSE_MS + FADE_MS + ZOOM_MS + 100)
+        assertEquals(Phase.HOLD, timeline.phase)
+        timeline.togglePause(now)
+        timeline.reset(now)
+        assertEquals(Phase.WAIT, timeline.phase)
+        assertFalse(timeline.paused)
+        assertTrue(Event.START_PHOTO in advance(PAUSE_MS + 50))
+    }
 }
