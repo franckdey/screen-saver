@@ -2,6 +2,32 @@ package com.maxime.photodream
 
 import android.content.Context
 
+/** Un dossier réseau supplémentaire et sa coche « Utiliser ce dossier ». */
+data class NetFolder(val address: String, val enabled: Boolean = true) {
+    companion object {
+        /** Une ligne par dossier ; « # » devant l'adresse d'un dossier décoché. */
+        fun parse(text: String): List<NetFolder> = text.lines().map { it.trim() }.filter { it.isNotEmpty() }.map {
+            if (it.startsWith("#")) NetFolder(it.substring(1).trim(), false) else NetFolder(it)
+        }.filter { it.address.isNotEmpty() }
+
+        fun serialize(folders: List<NetFolder>): String = folders
+            .map { it.copy(address = it.address.trim()) }
+            .filter { it.address.isNotEmpty() }
+            .joinToString("\n") { if (it.enabled) it.address else "#" + it.address }
+
+        /** Les dossiers cochés et remplis, sans doublon, le principal en premier. */
+        fun enabled(main: String, mainOn: Boolean, extras: List<NetFolder>): List<Pair<String, Boolean>> {
+            val out = ArrayList<Pair<String, Boolean>>()
+            if (mainOn && main.isNotBlank()) out += main.trim() to true
+            for (f in extras) {
+                val a = f.address.trim()
+                if (f.enabled && a.isNotEmpty() && out.none { it.first == a }) out += a to false
+            }
+            return out
+        }
+    }
+}
+
 /** Réglages de l'application, stockés localement sur la TV. */
 class Prefs(context: Context) {
     private val sp = context.getSharedPreferences("photodream", Context.MODE_PRIVATE)
@@ -11,14 +37,23 @@ class Prefs(context: Context) {
         get() = sp.getString("address", "") ?: ""
         set(v) = sp.edit().putString("address", v.trim()).apply()
 
-    /** Dossiers réseau supplémentaires, lus en plus de [address] avec les mêmes identifiants. */
-    var extraAddresses: List<String>
-        get() = (sp.getString("extraAddresses", "") ?: "").lines().map { it.trim() }.filter { it.isNotEmpty() }
-        set(v) = sp.edit().putString("extraAddresses", v.map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n")).apply()
+    /** Coche « Utiliser ce dossier » du dossier réseau principal. */
+    var addressEnabled: Boolean
+        get() = sp.getBoolean("addressEnabled", true)
+        set(v) = sp.edit().putBoolean("addressEnabled", v).apply()
 
-    /** Tous les dossiers réseau réglés, le principal en premier. */
+    /** Dossiers réseau supplémentaires, lus en plus de [address] avec les mêmes identifiants. */
+    var extraFolders: List<NetFolder>
+        get() = NetFolder.parse(sp.getString("extraAddresses", "") ?: "")
+        set(v) = sp.edit().putString("extraAddresses", NetFolder.serialize(v)).apply()
+
+    /** Les dossiers cochés, le principal en premier, avec pour chacun « est-ce le principal ». */
+    val enabledFolders: List<Pair<String, Boolean>>
+        get() = NetFolder.enabled(address, addressEnabled, extraFolders)
+
+    /** Adresses des dossiers cochés. */
     val allAddresses: List<String>
-        get() = (listOf(address) + extraAddresses).filter { it.isNotBlank() }.distinct()
+        get() = enabledFolders.map { it.first }
 
     var user: String
         get() = sp.getString("user", "") ?: ""

@@ -65,7 +65,7 @@ class PhotoRepository(
         source = null
         val src = sourceFactory(prefs)
         if (src == null) {
-            lastError = "Aucun dossier réseau configuré (ouvre l'appli PhotoDream pour le régler)"
+            lastError = "Aucun dossier réseau configuré ou coché (ouvre l'appli PhotoDream pour le régler)"
         } else {
             source = src
             val saved = if (useSaved) readListing() else null
@@ -402,11 +402,15 @@ class PhotoRepository(
          * Avec plusieurs dossiers, leurs photos sont réunies.
          */
         fun smbSource(prefs: Prefs): PhotoSource? {
-            val sources = prefs.allAddresses.mapNotNull { address -> smbSourceFor(prefs, address)?.let { address to it } }
-            return when (sources.size) {
-                0 -> null
-                1 -> sources[0].second
-                else -> MultiPhotoSource.of(sources)
+            // le dossier principal garde ses chemins tels quels, les autres sont repérés par leur adresse :
+            // cocher ou décocher un dossier ne change pas le nom des photos des autres
+            val parts = prefs.enabledFolders.mapNotNull { (address, main) ->
+                smbSourceFor(prefs, address)?.let { MultiPhotoSource.Part(address, it, if (main) "" else MultiPhotoSource.tagOf(address)) }
+            }
+            return when {
+                parts.isEmpty() -> null
+                parts.size == 1 && parts[0].tag.isEmpty() -> parts[0].source
+                else -> MultiPhotoSource(parts)
             }
         }
 
