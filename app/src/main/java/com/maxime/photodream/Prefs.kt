@@ -11,6 +11,15 @@ class Prefs(context: Context) {
         get() = sp.getString("address", "") ?: ""
         set(v) = sp.edit().putString("address", v.trim()).apply()
 
+    /** Dossiers réseau supplémentaires, lus en plus de [address] avec les mêmes identifiants. */
+    var extraAddresses: List<String>
+        get() = (sp.getString("extraAddresses", "") ?: "").lines().map { it.trim() }.filter { it.isNotEmpty() }
+        set(v) = sp.edit().putString("extraAddresses", v.map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n")).apply()
+
+    /** Tous les dossiers réseau réglés, le principal en premier. */
+    val allAddresses: List<String>
+        get() = (listOf(address) + extraAddresses).filter { it.isNotBlank() }.distinct()
+
     var user: String
         get() = sp.getString("user", "") ?: ""
         set(v) = sp.edit().putString("user", v.trim()).apply()

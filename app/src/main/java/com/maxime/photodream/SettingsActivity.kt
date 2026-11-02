@@ -33,6 +33,9 @@ class SettingsActivity : Activity() {
     private val scope = MainScope()
     private lateinit var prefs: Prefs
     private lateinit var address: EditText
+    /** Dossiers réseau supplémentaires, un champ chacun. */
+    private val extraFields = ArrayList<EditText>()
+    private lateinit var extraBox: LinearLayout
     private lateinit var user: EditText
     private lateinit var password: EditText
     private lateinit var domain: EditText
@@ -106,6 +109,15 @@ class SettingsActivity : Activity() {
         // Partie basse : le dossier réseau, les identifiants et les tests.
         val bottom = section(root, "Dossier réseau et tests")
         address = field(bottom, "Dossier réseau (ex. smb://192.168.1.20/photo/Vacances)", prefs.address)
+        // autres dossiers réseau, lus en plus du premier (mêmes identifiants)
+        extraBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        bottom.addView(extraBox)
+        prefs.extraAddresses.forEach { addExtraField(it) }
+        bottom.addView(button("+ Ajouter un dossier réseau") {
+            addExtraField("").requestFocus()
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(8)
+        })
         user = field(bottom, "Utilisateur (laisser vide pour un accès invité)", prefs.user)
         password = field(bottom, "Mot de passe", prefs.password, secret = true)
         domain = field(bottom, "Domaine / groupe de travail (généralement vide)", prefs.domain)
@@ -156,12 +168,34 @@ class SettingsActivity : Activity() {
 
     private fun save() {
         prefs.address = address.text.toString()
+        prefs.extraAddresses = extraFields.map { it.text.toString() }
         prefs.user = user.text.toString()
         prefs.password = password.text.toString()
         prefs.domain = domain.text.toString()
         prefs.recursive = recursive.isChecked
         prefs.showFolder = showFolder.isChecked
         prefs.showClock = showClock.isChecked
+    }
+
+    /** Un champ pour un dossier réseau de plus, avec son bouton pour le retirer. */
+    private fun addExtraField(value: String): EditText {
+        val block = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val edit = field(block, "Autre dossier réseau", value)
+        val remove = button("Retirer ce dossier") {
+            val i = extraBox.indexOfChild(block)
+            extraFields.remove(edit)
+            extraBox.removeView(block)
+            save()
+            // le focus passe au dossier suivant (ou précédent), pas en haut de l'écran
+            val next = extraBox.getChildAt(i) ?: extraBox.getChildAt(i - 1)
+            (next as? ViewGroup)?.let { g -> (0 until g.childCount).map { g.getChildAt(it) }.firstOrNull { it is EditText } }
+                ?.requestFocus() ?: address.requestFocus()
+        }
+        block.addView(remove, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        extraBox.addView(block)
+        extraFields += edit
+        highlightFocus(block)
+        return edit
     }
 
     private fun testConnection() {
@@ -174,6 +208,24 @@ class SettingsActivity : Activity() {
                 repo.offline -> "Échec : ${repo.lastError}\n($count photos déjà en cache restent utilisables)"
                 repo.lastError != null -> "Échec : ${repo.lastError}"
                 else -> "OK : $count photos trouvées."
+            }
+            // plusieurs dossiers : le détail de chacun, pour repérer celui qui ne répond pas
+            val addresses = prefs.allAddresses
+            if (addresses.size > 1) {
+                val details = withContext(Dispatchers.IO) {
+                    addresses.map { address ->
+                        val src = PhotoRepository.smbSourceFor(prefs, address)
+                            ?: return@map "• $address : adresse non reconnue"
+                        try {
+                            "• $address : ${src.listPhotos(prefs.recursive).size} photos"
+                        } catch (e: Exception) {
+                            "• $address : échec (${SmbPhotoSource.describe(e)})"
+                        } finally {
+                            runCatching { src.close() }
+                        }
+                    }
+                }
+                status.text = status.text.toString() + "\n" + details.joinToString("\n")
             }
             Thread { repo.close() }.start()
         }
