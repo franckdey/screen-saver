@@ -136,7 +136,7 @@ class PhotoRepository(
     }
 
     /** Clé du dossier réglé : une autre adresse ou un autre choix de sous-dossiers invalide la liste. */
-    private fun listingKey() = "${prefs.address.trim()}|${prefs.recursive}"
+    private fun listingKey() = "${prefs.allAddresses.joinToString(";")}|${prefs.recursive}"
 
     private fun saveListing(list: List<RemotePhoto>) {
         if (list.isEmpty()) return
@@ -397,9 +397,22 @@ class PhotoRepository(
     }
 
     companion object {
-        /** La source par défaut : le partage SMB réglé dans l'appli, ou null s'il n'y en a pas. */
+        /**
+         * La source par défaut : le ou les partages SMB réglés dans l'appli, ou null s'il n'y en a pas.
+         * Avec plusieurs dossiers, leurs photos sont réunies.
+         */
         fun smbSource(prefs: Prefs): PhotoSource? {
-            val location = SmbLocation.parse(prefs.address) ?: return null
+            val sources = prefs.allAddresses.mapNotNull { address -> smbSourceFor(prefs, address)?.let { address to it } }
+            return when (sources.size) {
+                0 -> null
+                1 -> sources[0].second
+                else -> MultiPhotoSource.of(sources)
+            }
+        }
+
+        /** Un seul dossier réseau, avec les identifiants réglés ; null si l'adresse n'est pas valable. */
+        fun smbSourceFor(prefs: Prefs, address: String): SmbPhotoSource? {
+            val location = SmbLocation.parse(address) ?: return null
             return SmbPhotoSource(
                 location, prefs.user, prefs.password, prefs.domain,
                 compat = prefs.smbCompat,

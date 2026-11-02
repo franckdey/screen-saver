@@ -119,9 +119,14 @@ boutons de test). Le dossier réseau se règle ainsi :
 | Réglage | Exemple |
 |---|---|
 | Dossier réseau | `smb://192.168.1.20/photo/Vacances` ou `\\NAS\photo\Vacances` |
+| Autres dossiers réseau | bouton **+ Ajouter un dossier réseau**, autant que nécessaire (« Retirer ce dossier » pour en enlever un) ; leurs photos sont mélangées à celles du premier |
 | Utilisateur | compte du NAS (vide = accès invité) |
 | Mot de passe | mot de passe de ce compte |
 | Domaine | presque toujours vide |
+
+Tous les dossiers utilisent le même utilisateur et le même mot de passe. Avec plusieurs dossiers,
+**Tester la connexion** donne aussi le nombre de photos de chacun ; un dossier injoignable est
+simplement ignoré tant qu'un autre répond.
 
 Le chemin se lit ainsi : `smb://` + **adresse du NAS** + **nom du partage** + dossier(s).
 Quelques exemples courants :

@@ -31,17 +31,20 @@ class PhotoDiagnostic(
         lines: MutableList<String>,
         onStep: (String) -> Unit,
     ): ByteArray? {
-        if (src !is SmbPhotoSource) {
-            return src.read(path).also { step("3. Téléchargée : ${it.size / 1024} Ko (${elapsed()})") }
+        // avec plusieurs dossiers, on teste celui d'où vient la photo
+        val (address, inner) = when (src) {
+            is SmbPhotoSource -> prefs.address to path
+            is MultiPhotoSource -> src.locate(path)
+            else -> return src.read(path).also { step("3. Téléchargée : ${it.size / 1024} Ko (${elapsed()})") }
         }
-        val location = SmbLocation.parse(prefs.address) ?: return null
+        val location = SmbLocation.parse(address) ?: return null
         for (compat in listOf(false, true)) {
             val label = if (compat) "mode compatible SMB 2" else "mode normal"
             val source = SmbPhotoSource(location, prefs.user, prefs.password, prefs.domain, compat = compat, autoCompat = false)
             var received = 0L
             step("3. Téléchargement ($label)…")
             try {
-                val bytes = source.read(path) { done ->
+                val bytes = source.read(inner) { done ->
                     received = done
                     lines[lines.lastIndex] = "3. Téléchargement ($label) : ${done / 1024} Ko…"
                     onStep(lines.joinToString("\n"))
