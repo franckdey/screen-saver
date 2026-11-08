@@ -275,7 +275,8 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         loadingNext = true
         // De préférence une vignette visible, pas encore montrée : c'est exactement
         // cette photo-là qui grandira.
-        val target = candidateTile()
+        // dossier par dossier, la photo suivante vient de la liste et non d'une vignette au hasard
+        val target = if (prefs.mosaicRandom) candidateTile() else null
         nextTarget = target
         s.launch {
             val photo = target?.photo?.let { repo.loadPhoto(it, blurLevel) } ?: run {
@@ -498,11 +499,18 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
 
     /** Démarre le diaporama simple, là où le précédent s'était arrêté. */
     private fun startSimple() {
-        val list = repo.orderedPhotos()
+        val random = prefs.simpleRandom
+        val list = if (random) repo.randomOrderPhotos() else repo.orderedPhotos()
         if (list.isEmpty()) return
         val last = prefs.simpleLast
         val start = list.indexOfFirst { it.path == last }.coerceAtLeast(0)
-        player = PhotoPlayer(list, start, prefs.simpleSeconds * 1000L)
+        // en aléatoire, chaque tour tire un nouvel ordre, mémorisé pour les lancements suivants
+        val reshuffle: ((List<RemotePhoto>) -> List<RemotePhoto>)? = if (random) {
+            { old -> RandomOrder.reshuffle(old).also { repo.saveRandomOrder(it) } }
+        } else {
+            null
+        }
+        player = PhotoPlayer(list, start, prefs.simpleSeconds * 1000L, reshuffle)
         if (start > 0) showNotice("Reprise à la photo ${start + 1} sur ${list.size}", 4_000)
         simpleEnsure()
     }
@@ -885,16 +893,22 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
             // Nom du dossier en bas de la photo, sur un léger dégradé sombre pour rester lisible
             val alpha = fgZoom.pow(3)
             val size = labelSize
-            val scrimH = min(clipRect.height() * 0.45f, size * 6f)
+            val normal = textPaint.textSize
+            textPaint.textSize = size
+            // trop longue pour la largeur de la photo : sur deux lignes
+            val lines = TextWrap.wrap(photo.label, clipRect.width() - size * 1.8f, textPaint::measureText)
+            val lineH = size * 1.3f
+            val scrimH = min(clipRect.height() * 0.45f, size * 6f + lineH * (lines.size - 1))
             scrimPaint.shader = LinearGradient(
                 0f, clipRect.bottom - scrimH, 0f, clipRect.bottom,
                 Color.TRANSPARENT, Color.argb(150, 0, 0, 0), Shader.TileMode.CLAMP,
             )
             scrimPaint.alpha = (255 * alpha).toInt()
             canvas.drawRect(clipRect.left, clipRect.bottom - scrimH, clipRect.right, clipRect.bottom, scrimPaint)
-            val normal = textPaint.textSize
-            textPaint.textSize = size
-            drawText(canvas, photo.label, clipRect.left + size * 0.9f, clipRect.bottom - size * 0.8f, alpha, Paint.Align.LEFT)
+            lines.forEachIndexed { i, line ->
+                val y = clipRect.bottom - size * 0.8f - lineH * (lines.size - 1 - i)
+                drawText(canvas, line, clipRect.left + size * 0.9f, y, alpha, Paint.Align.LEFT)
+            }
             textPaint.textSize = normal
         }
         canvas.restore()
@@ -916,10 +930,15 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         val normal = textPaint.textSize
         textPaint.textSize = size
         val bottom = height - size * 1.2f
-        if (prefs.showFolder && shown.label.isNotEmpty()) {
-            drawText(canvas, shown.label, size * 1.2f, bottom, 0.9f * fade, Paint.Align.LEFT)
-        }
         val position = if (f.paused) "Pause · ${f.index + 1} / ${f.photos.size}" else "${f.index + 1} / ${f.photos.size}"
+        if (prefs.showFolder && shown.label.isNotEmpty()) {
+            // la légende s'arrête avant le numéro de la photo, quitte à passer sur deux lignes
+            val maxW = width - size * 2.4f - textPaint.measureText(position) - size * 1.5f
+            val lines = TextWrap.wrap(shown.label, maxW, textPaint::measureText)
+            lines.forEachIndexed { i, line ->
+                drawText(canvas, line, size * 1.2f, bottom - size * 1.3f * (lines.size - 1 - i), 0.9f * fade, Paint.Align.LEFT)
+            }
+        }
         drawText(canvas, position, width - size * 1.2f, bottom, 0.8f, Paint.Align.RIGHT)
         textPaint.textSize = normal
     }
