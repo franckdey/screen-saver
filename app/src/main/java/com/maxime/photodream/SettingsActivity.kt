@@ -98,6 +98,13 @@ class SettingsActivity : Activity() {
         top.addView(cycler("Durée par photo dans le diaporama simple", listOf(3, 5, 8, 10, 15, 30), prefs.simpleSeconds, { "$it s" }) {
             prefs.simpleSeconds = it
         })
+        fun orderName(random: Boolean) = if (random) "aléatoire, sans revoir une photo avant d'avoir tout vu" else "dossier par dossier"
+        top.addView(cycler("Ordre des photos de la mosaïque", listOf(true, false), prefs.mosaicRandom, ::orderName) {
+            prefs.mosaicRandom = it
+        })
+        top.addView(cycler("Ordre du diaporama simple", listOf(false, true), prefs.simpleRandom, ::orderName) {
+            prefs.simpleRandom = it
+        })
         top.addView(cycler("Densité des vignettes (plus = plus petites)", listOf(3, 4, 5, 6), prefs.rows, { "$it" }) {
             prefs.rows = it
         })

@@ -275,7 +275,8 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         loadingNext = true
         // De préférence une vignette visible, pas encore montrée : c'est exactement
         // cette photo-là qui grandira.
-        val target = candidateTile()
+        // dossier par dossier, la photo suivante vient de la liste et non d'une vignette au hasard
+        val target = if (prefs.mosaicRandom) candidateTile() else null
         nextTarget = target
         s.launch {
             val photo = target?.photo?.let { repo.loadPhoto(it, blurLevel) } ?: run {
@@ -498,11 +499,18 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
 
     /** Démarre le diaporama simple, là où le précédent s'était arrêté. */
     private fun startSimple() {
-        val list = repo.orderedPhotos()
+        val random = prefs.simpleRandom
+        val list = if (random) repo.randomOrderPhotos() else repo.orderedPhotos()
         if (list.isEmpty()) return
         val last = prefs.simpleLast
         val start = list.indexOfFirst { it.path == last }.coerceAtLeast(0)
-        player = PhotoPlayer(list, start, prefs.simpleSeconds * 1000L)
+        // en aléatoire, chaque tour tire un nouvel ordre, mémorisé pour les lancements suivants
+        val reshuffle: ((List<RemotePhoto>) -> List<RemotePhoto>)? = if (random) {
+            { old -> RandomOrder.reshuffle(old).also { repo.saveRandomOrder(it) } }
+        } else {
+            null
+        }
+        player = PhotoPlayer(list, start, prefs.simpleSeconds * 1000L, reshuffle)
         if (start > 0) showNotice("Reprise à la photo ${start + 1} sur ${list.size}", 4_000)
         simpleEnsure()
     }

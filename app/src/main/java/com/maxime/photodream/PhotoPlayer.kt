@@ -1,12 +1,20 @@
 package com.maxime.photodream
 
 /**
- * Le diaporama simple, sans aucun dessin : les photos dans l'ordre des dossiers, une
+ * Le diaporama simple, sans aucun dessin : les photos dans l'ordre donné (par dossier ou aléatoire), une
  * toutes les [intervalMs], avec retour en arrière et pause. Le temps ne compte qu'à partir du
  * moment où la photo est vraiment affichée, pour qu'un chargement lent ne la fasse pas sauter.
  * Séparé de la vue pour pouvoir être testé.
  */
-class PhotoPlayer(val photos: List<RemotePhoto>, start: Int, private val intervalMs: Long) {
+class PhotoPlayer(
+    photos: List<RemotePhoto>,
+    start: Int,
+    private val intervalMs: Long,
+    /** En ordre aléatoire : nouveau tirage quand on repart après la dernière photo. */
+    private val reshuffle: ((List<RemotePhoto>) -> List<RemotePhoto>)? = null,
+) {
+    var photos: List<RemotePhoto> = photos
+        private set
 
     init {
         require(photos.isNotEmpty())
@@ -52,7 +60,14 @@ class PhotoPlayer(val photos: List<RemotePhoto>, start: Int, private val interva
     }
 
     private fun go(i: Int) {
-        index = wrap(i)
+        val again = reshuffle
+        if (i >= photos.size && again != null) {
+            // toutes les photos sont passées : nouveau tour, dans un nouvel ordre
+            photos = again(photos)
+            index = 0
+        } else {
+            index = wrap(i)
+        }
         shownAt = -1L
     }
 

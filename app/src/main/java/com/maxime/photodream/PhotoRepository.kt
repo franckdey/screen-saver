@@ -35,6 +35,8 @@ class PhotoRepository(
     private val tileQueue = ArrayDeque<RemotePhoto>()
     /** Photos déjà montrées en grand, gardées d'un lancement à l'autre. */
     private val seenFile = File(context.filesDir, "photos-vues.txt")
+    /** Ordre aléatoire du diaporama simple, gardé d'un lancement à l'autre. */
+    private val orderFile = File(context.filesDir, "ordre-aleatoire.txt")
     /** Noms de lieux déjà trouvés à partir du GPS des photos. */
     private val places = PlaceNames(File(context.filesDir, "lieux.txt"))
     private var seen: MutableSet<String>? = null
@@ -131,7 +133,7 @@ class PhotoRepository(
         val known = kept.toHashSet()
         queue.clear()
         queue.addAll(kept)
-        queue.addAll(list.filter { it !in known && it.path !in seenSet() }.shuffled())
+        queue.addAll(order(list.filter { it !in known && it.path !in seenSet() }))
         tileQueue.retainAll(present)
     }
 
@@ -192,6 +194,27 @@ class PhotoRepository(
     /** Toutes les photos, dossier par dossier et par nom, pour le diaporama simple. */
     fun orderedPhotos(): List<RemotePhoto> = PhotoPlayer.ordered(photos)
 
+    /** Ordre des photos en grand de la mosaïque : aléatoire ou dossier par dossier, selon le réglage. */
+    private fun order(list: List<RemotePhoto>) = if (prefs.mosaicRandom) list.shuffled() else PhotoPlayer.ordered(list)
+
+    /** Diaporama simple en ordre aléatoire : l'ordre mémorisé, complété des nouvelles photos. */
+    fun randomOrderPhotos(): List<RemotePhoto> {
+        val saved = try {
+            if (orderFile.exists()) orderFile.readLines() else emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+        return RandomOrder.reconcile(saved, photos).also { saveRandomOrder(it) }
+    }
+
+    fun saveRandomOrder(list: List<RemotePhoto>) {
+        try {
+            orderFile.writeText(list.joinToString("\n") { it.path })
+        } catch (e: Exception) {
+            // pas grave : un nouvel ordre sera tiré au prochain lancement
+        }
+    }
+
     private suspend fun load(photo: RemotePhoto, blurLevel: Int, withTile: Boolean = true): LoadedPhoto? {
         val file = localFile(photo) ?: run {
             markSeen(photo) // illisible : on la saute pour ce tour au lieu de la redemander
@@ -234,15 +257,18 @@ class PhotoRepository(
     @Synchronized
     private fun nextRemote(): RemotePhoto? {
         if (photos.isEmpty()) return null
-        if (queue.isEmpty()) {
-            val seenNow = seenSet()
-            var fresh = photos.filter { it.path !in seenNow }
-            if (fresh.isEmpty()) {
-                resetSeen()
-                fresh = photos
-            }
-            queue.addAll(fresh.shuffled())
+        // une photo déjà montrée entre-temps (agrandie depuis sa vignette) ne repasse pas dans ce tour
+        val seenNow = seenSet()
+        while (queue.isNotEmpty()) {
+            val p = queue.removeFirst()
+            if (p.path !in seenNow) return p
         }
+        var fresh = photos.filter { it.path !in seenNow }
+        if (fresh.isEmpty()) {
+            resetSeen()
+            fresh = photos
+        }
+        queue.addAll(order(fresh))
         return queue.removeFirst()
     }
 
@@ -337,6 +363,7 @@ class PhotoRepository(
     fun clearCache() {
         cacheDir.listFiles()?.forEach { it.delete() }
         listingFile.delete()
+        orderFile.delete()
         resetSeen()
     }
 

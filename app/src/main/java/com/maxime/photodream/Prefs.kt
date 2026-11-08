@@ -96,6 +96,16 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("simpleScreensaver", false)
         set(v) = sp.edit().putBoolean("simpleScreensaver", v).apply()
 
+    /** Mosaïque : photos en grand dans un ordre aléatoire (sinon dossier par dossier). */
+    var mosaicRandom: Boolean
+        get() = sp.getBoolean("mosaicRandom", true)
+        set(v) = sp.edit().putBoolean("mosaicRandom", v).apply()
+
+    /** Diaporama simple : ordre aléatoire (sinon dossier par dossier). */
+    var simpleRandom: Boolean
+        get() = sp.getBoolean("simpleRandom", false)
+        set(v) = sp.edit().putBoolean("simpleRandom", v).apply()
+
     /** Densité de la mosaïque : plus la valeur est grande, plus les vignettes sont petites. */
     var rows: Int
         get() = sp.getInt("rows", 4)

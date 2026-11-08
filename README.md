@@ -173,6 +173,11 @@ rapide entre deux photos.
 - Réglage **« Économiseur d'écran : mosaïque animée / diaporama simple »** pour choisir ce que
   l'économiseur affiche.
 - Réglage **« Durée par photo dans le diaporama simple »** (3 à 30 s, 5 s par défaut).
+- Réglage **« Ordre du diaporama simple »** : dossier par dossier (par défaut) ou aléatoire. En
+  aléatoire, chaque photo passe une fois avant qu'une autre ne revienne, même d'un lancement à
+  l'autre ; une fois tout vu, un nouvel ordre est tiré.
+- Le réglage **« Ordre des photos de la mosaïque »** fait de même pour la mosaïque (aléatoire par
+  défaut, ou dossier par dossier).
 
 | Touche ou appui | Effet |
 |---|---|
