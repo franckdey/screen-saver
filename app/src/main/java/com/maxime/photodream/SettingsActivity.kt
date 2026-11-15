@@ -105,6 +105,8 @@ class SettingsActivity : Activity() {
         top.addView(cycler("Ordre du diaporama simple", listOf(false, true), prefs.simpleRandom, ::orderName) {
             prefs.simpleRandom = it
         })
+        top.addView(cycler("Effet entre deux photos du diaporama simple", Transition.entries.toList(),
+            Transition.of(prefs.simpleTransition), { it.label }) { prefs.simpleTransition = it.key })
         top.addView(cycler("Densité des vignettes (plus = plus petites)", listOf(3, 4, 5, 6), prefs.rows, { "$it" }) {
             prefs.rows = it
         })

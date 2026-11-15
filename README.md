@@ -173,6 +173,8 @@ rapide entre deux photos.
 - Réglage **« Économiseur d'écran : mosaïque animée / diaporama simple »** pour choisir ce que
   l'économiseur affiche.
 - Réglage **« Durée par photo dans le diaporama simple »** (3 à 30 s, 5 s par défaut).
+- Réglage **« Effet entre deux photos du diaporama simple »** : fondu enchaîné (par défaut),
+  fondu au noir, glissement, zoom, rideau, ou au hasard (un effet différent à chaque photo).
 - Réglage **« Ordre du diaporama simple »** : dossier par dossier (par défaut) ou aléatoire. En
   aléatoire, chaque photo passe une fois avant qu'une autre ne revienne, même d'un lancement à
   l'autre ; une fois tout vu, un nouvel ordre est tiré.
