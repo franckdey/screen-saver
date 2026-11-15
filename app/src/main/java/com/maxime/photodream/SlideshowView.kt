@@ -126,6 +126,10 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
     private var simpleShown: LoadedPhoto? = null
     private var simpleFading: LoadedPhoto? = null
     private var simpleFadeStart = 0L
+    /** Effet en cours entre [simpleFading] et [simpleShown], et son sens (faux en arrière). */
+    private var simpleEffect = Transition.FADE
+    private var simpleForward = true
+    private val simpleTransition = Transition.of(prefs.simpleTransition)
     /** Photos déjà chargées (l'actuelle et ses voisines, pour naviguer sans attendre). */
     private val simpleCache = HashMap<RemotePhoto, LoadedPhoto>()
     private val simpleLoading = HashSet<RemotePhoto>()
@@ -451,6 +455,7 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
     /** Passe tout de suite à la photo suivante. */
     fun skip() {
         val f = player ?: return timeline.skip()
+        simpleForward = true
         f.next()
         simpleEnsure()
     }
@@ -458,6 +463,7 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
     /** Revient à la photo précédente ; chaque appui remonte d'une photo de plus. */
     fun previous() {
         player?.let { f ->
+            simpleForward = false
             f.previous()
             simpleEnsure()
             return
@@ -538,6 +544,7 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         simpleFading = simpleShown
         simpleShown = photo
         simpleFadeStart = now
+        simpleEffect = simpleTransition.resolve(simpleEffect)
         simpleFailures = 0
         player?.shown(now)
     }
@@ -685,7 +692,10 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         val f = player
         if (simple) {
             if (f != null) {
-                if (f.update(now)) simpleEnsure()
+                if (f.update(now)) {
+                    simpleForward = true
+                    simpleEnsure()
+                }
                 drawSimple(canvas, f, now)
             }
         } else if (tiles.isNotEmpty() && selecting) {
@@ -917,14 +927,15 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
     /** Diaporama simple : la photo entière en plein écran, en fondu enchaîné avec la précédente. */
     private fun drawSimple(canvas: Canvas, f: PhotoPlayer, now: Long) {
         val shown = simpleShown
-        val fade = ((now - simpleFadeStart) / SIMPLE_FADE_MS.toFloat()).coerceIn(0f, 1f)
+        val fade = ((now - simpleFadeStart) / simpleEffect.durationMs.toFloat()).coerceIn(0f, 1f)
         if (fade >= 1f) simpleFading = null
-        simpleFading?.let { drawFitted(canvas, it.full, 1f - fade) }
+        val (oldLayer, newLayer) = simpleEffect.frame(fade, simpleForward)
+        simpleFading?.let { drawFitted(canvas, it.full, oldLayer) }
         if (shown == null) {
             if (status == null) drawText(canvas, "Chargement…", width / 2f, height / 2f, 0.8f, Paint.Align.CENTER)
             return
         }
-        drawFitted(canvas, shown.full, fade)
+        drawFitted(canvas, shown.full, if (simpleFading == null) Layer() else newLayer)
         // légende (lieu et date, ou dossier et nom) et position dans la liste
         val size = labelSize
         val normal = textPaint.textSize
@@ -943,15 +954,23 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         textPaint.textSize = normal
     }
 
-    private fun drawFitted(canvas: Canvas, bmp: Bitmap, alpha: Float) {
-        if (alpha <= 0f) return
+    /** La photo entière à l'écran, avec l'opacité, le décalage, le zoom et la découpe de [layer]. */
+    private fun drawFitted(canvas: Canvas, bmp: Bitmap, layer: Layer) {
+        if (layer.alpha <= 0f || layer.clipTo <= layer.clipFrom) return
         val bw = bmp.width.toFloat()
         val bh = bmp.height.toFloat()
-        val fit = min(width / bw, height / bh)
-        centered(photoRect, width / 2f, height / 2f, bw * fit, bh * fit)
-        bitmapPaint.alpha = (255 * alpha).toInt()
+        val fit = min(width / bw, height / bh) * layer.scale
+        centered(photoRect, width / 2f + layer.dx * width, height / 2f, bw * fit, bh * fit)
+        canvas.save()
+        if (layer.clipFrom > 0f || layer.clipTo < 1f) {
+            canvas.clipRect(layer.clipFrom * width, 0f, layer.clipTo * width, height.toFloat())
+            // rideau : fond noir sous la nouvelle photo, pour cacher l'ancienne dans les marges
+            canvas.drawColor(Color.BLACK)
+        }
+        bitmapPaint.alpha = (255 * layer.alpha).toInt()
         canvas.drawBitmap(bmp, null, photoRect, bitmapPaint)
         bitmapPaint.alpha = 255
+        canvas.restore()
     }
 
     private fun drawOverlays(canvas: Canvas, now: Long) {
@@ -997,7 +1016,6 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
 
     companion object {
         private const val TILE_FADE_MS = 700L
-        private const val SIMPLE_FADE_MS = 500L
         private const val MAX_POOL = 120
         private const val VIEWER_ZOOM_MS = 900L
         /** Sans appui pendant ce temps, la mosaïque figée repart toute seule. */

@@ -106,6 +106,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("simpleRandom", false)
         set(v) = sp.edit().putBoolean("simpleRandom", v).apply()
 
+    /** Effet de passage d'une photo à l'autre dans le diaporama simple (voir [Transition]). */
+    var simpleTransition: String
+        get() = sp.getString("simpleTransition", Transition.FADE.key) ?: Transition.FADE.key
+        set(v) = sp.edit().putString("simpleTransition", v).apply()
+
     /** Densité de la mosaïque : plus la valeur est grande, plus les vignettes sont petites. */
     var rows: Int
         get() = sp.getInt("rows", 4)
