@@ -13,4 +13,10 @@ interface PhotoSource : Closeable {
 
     /** Nom du dossier de la photo, tel qu'on l'affiche sous la photo. */
     fun folderLabel(photo: RemotePhoto): String
+
+    /** Nom de la photo affiché à défaut de lieu : par défaut, le nom du fichier sans extension. */
+    fun displayName(photo: RemotePhoto): String = photo.path.substringAfterLast('\\').substringBeforeLast('.')
+
+    /** Auteur et licence à afficher avec la photo (photos du web), ou null. */
+    fun credit(photo: RemotePhoto): String? = null
 }

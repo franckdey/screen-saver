@@ -51,6 +51,16 @@ class MultiPhotoSource(private val parts: List<Part>) : PhotoSource {
         return part.source.folderLabel(photo.copy(path = inner))
     }
 
+    override fun displayName(photo: RemotePhoto): String {
+        val (part, inner) = route(photo.path)
+        return part.source.displayName(photo.copy(path = inner))
+    }
+
+    override fun credit(photo: RemotePhoto): String? {
+        val (part, inner) = route(photo.path)
+        return part.source.credit(photo.copy(path = inner))
+    }
+
     /** L'adresse du dossier d'une photo et son chemin dans ce dossier (pour le test d'une photo). */
     fun locate(path: String): Pair<String, String> {
         val (part, inner) = route(path)
