@@ -42,6 +42,7 @@ class SettingsActivity : Activity() {
     private lateinit var domain: EditText
     private lateinit var recursive: CheckBox
     private lateinit var webPhotos: CheckBox
+    private var formRoot: LinearLayout? = null
     private lateinit var showFolder: CheckBox
     private lateinit var showClock: CheckBox
     private lateinit var status: TextView
@@ -166,6 +167,8 @@ class SettingsActivity : Activity() {
             addView(root)
         })
         highlightFocus(root)
+        formRoot = root
+        chainFocus()
         // dossier pas encore réglé : on commence par l'adresse, sinon par « Lancer le diaporama »
         if (prefs.address.isBlank()) address.requestFocus() else launchButton.requestFocus()
         checkUpdate(manual = false)
@@ -208,6 +211,7 @@ class SettingsActivity : Activity() {
             val i = extraBox.indexOfChild(block)
             extraFields.remove(entry)
             extraBox.removeView(block)
+            chainFocus()
             save()
             // le focus passe au dossier suivant (ou précédent), pas en haut de l'écran
             val next = extraBox.getChildAt(i) ?: extraBox.getChildAt(i - 1)
@@ -221,6 +225,7 @@ class SettingsActivity : Activity() {
         extraBox.addView(block)
         extraFields += entry
         highlightFocus(block)
+        chainFocus()
         return edit
     }
 
@@ -293,6 +298,7 @@ class SettingsActivity : Activity() {
             if (info != null) {
                 updateButton.text = "Installer la mise à jour (version ${info.versionName})"
                 updateButton.visibility = View.VISIBLE
+                chainFocus()
                 if (manual) {
                     status.text = "Nouvelle version ${info.versionName} disponible."
                     updateButton.requestFocus()
@@ -383,6 +389,42 @@ class SettingsActivity : Activity() {
             v.foreground = if (hasFocus) frame else null
         }
         if (view.isFocused) view.foreground = frame
+    }
+
+    /**
+     * Haut et bas de la télécommande : d'un élément à celui juste en dessous ou au-dessus, dans
+     * l'ordre de l'écran. Sans ça, Android choisit d'après la position à l'écran et saute
+     * parfois un élément étroit ou décalé (une coche, un bouton calé à gauche).
+     * Une rangée de boutons côte à côte compte pour une ligne.
+     */
+    private fun chainFocus() {
+        val root = formRoot ?: return
+        val lines = mutableListOf<List<View>>()
+        fun collect(v: View) {
+            if (v.visibility == View.GONE) return
+            if (v is LinearLayout && v.orientation == LinearLayout.HORIZONTAL) {
+                val row = mutableListOf<View>()
+                fun inRow(c: View) {
+                    if (c.visibility == View.GONE) return
+                    if (c is ViewGroup) for (i in 0 until c.childCount) inRow(c.getChildAt(i))
+                    else if (c.isFocusable) row += c
+                }
+                inRow(v)
+                if (row.isNotEmpty()) lines += row
+            } else if (v is ViewGroup) {
+                for (i in 0 until v.childCount) collect(v.getChildAt(i))
+            } else if (v.isFocusable) {
+                lines += listOf(v)
+            }
+        }
+        collect(root)
+        lines.flatten().forEach { if (it.id == View.NO_ID) it.id = View.generateViewId() }
+        for ((i, line) in lines.withIndex()) {
+            line.forEachIndexed { j, v ->
+                v.nextFocusDownId = lines.getOrNull(i + 1)?.let { it[minOf(j, it.lastIndex)].id } ?: View.NO_ID
+                v.nextFocusUpId = lines.getOrNull(i - 1)?.let { it[minOf(j, it.lastIndex)].id } ?: View.NO_ID
+            }
+        }
     }
 
     /** Un bloc encadré avec son titre, pour séparer l'écran en parties. */
