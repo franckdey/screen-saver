@@ -67,7 +67,7 @@ class PhotoRepository(
         source = null
         val src = sourceFactory(prefs)
         if (src == null) {
-            lastError = "Aucun dossier réseau configuré ou coché (ouvre l'appli PhotoDream pour le régler)"
+            lastError = "Aucun dossier réseau ni photo du web choisi (ouvre l'appli PhotoDream pour le régler)"
         } else {
             source = src
             val saved = if (useSaved) readListing() else null
@@ -138,7 +138,7 @@ class PhotoRepository(
     }
 
     /** Clé du dossier réglé : une autre adresse ou un autre choix de sous-dossiers invalide la liste. */
-    private fun listingKey() = "${prefs.allAddresses.joinToString(";")}|${prefs.recursive}"
+    private fun listingKey() = "${prefs.allAddresses.joinToString(";")}|${prefs.recursive}|${if (prefs.webPhotos) "web" else ""}"
 
     private fun saveListing(list: List<RemotePhoto>) {
         if (list.isEmpty()) return
@@ -330,6 +330,8 @@ class PhotoRepository(
             }
             // la copie réduite perd l'EXIF : on garde à côté le GPS et la date
             writeMeta(file, PhotoMeta.fromExif(bytes))
+            // et l'auteur d'une photo du web, à montrer même hors ligne
+            src.credit(photo)?.let { writeCredit(file, it) }
             if (++downloadsSinceTrim >= 20) {
                 downloadsSinceTrim = 0
                 trimCache(keep = file)
@@ -377,12 +379,14 @@ class PhotoRepository(
      * Pour une photo déjà en cache sans ces infos, on relit juste le début du fichier.
      */
     private suspend fun caption(photo: RemotePhoto, file: File): String {
-        if (!prefs.showFolder) return ""
+        // l'auteur et la licence d'une photo du web s'affichent toujours : sa licence le demande
+        val credit = readCredit(file)
+        if (!prefs.showFolder) return credit.orEmpty()
         val offline = photo.path.startsWith(CACHE_PREFIX)
         // sans lieu connu : le dossier et le nom de la photo
         val fallback = if (offline) "" else listOf(
             source?.folderLabel(photo).orEmpty(),
-            name(photo).substringBeforeLast('.'),
+            source?.displayName(photo) ?: name(photo).substringBeforeLast('.'),
         ).filter { it.isNotBlank() }.joinToString(" · ")
         var meta = readMeta(file)
         if (meta == null && !offline) {
@@ -396,7 +400,23 @@ class PhotoRepository(
             meta?.let { writeMeta(file, it) }
         }
         val place = meta?.let { m -> if (m.lat != null && m.lon != null) places.name(m.lat, m.lon) else null }
-        return Captions.format(place, meta?.taken, fallback)
+        return listOfNotNull(Captions.format(place, meta?.taken, fallback).ifBlank { null }, credit).joinToString(" · ")
+    }
+
+    private fun creditFile(file: File) = File(file.path.removeSuffix(".jpg") + ".credit")
+
+    private fun readCredit(file: File): String? = try {
+        creditFile(file).takeIf { it.exists() }?.readText()?.trim()?.ifEmpty { null }
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun writeCredit(file: File, credit: String) {
+        try {
+            creditFile(file).writeText(credit)
+        } catch (e: Exception) {
+            // pas grave : le crédit reviendra au prochain téléchargement
+        }
     }
 
     private fun metaFile(file: File) = File(file.path.removeSuffix(".jpg") + ".meta")
@@ -433,7 +453,10 @@ class PhotoRepository(
             // cocher ou décocher un dossier ne change pas le nom des photos des autres
             val parts = prefs.enabledFolders.mapNotNull { (address, main) ->
                 smbSourceFor(prefs, address)?.let { MultiPhotoSource.Part(address, it, if (main) "" else MultiPhotoSource.tagOf(address)) }
-            }
+            } + listOfNotNull(
+                // les paysages du web, à part : leurs chemins commencent par @web@
+                if (prefs.webPhotos) MultiPhotoSource.Part(WEB_LABEL, WikimediaSource(File(prefs.filesDir, "credits-web.txt")), WEB_TAG) else null,
+            )
             return when {
                 parts.isEmpty() -> null
                 parts.size == 1 && parts[0].tag.isEmpty() -> parts[0].source
@@ -451,6 +474,8 @@ class PhotoRepository(
             )
         }
 
+        const val WEB_LABEL = "Paysages du web (Wikimedia Commons)"
+        private const val WEB_TAG = "web"
         private const val CACHE_PREFIX = "cache:"
         private const val MAX_ATTEMPTS = 8
         /** L'EXIF est au début du fichier : 256 Ko suffisent largement. */

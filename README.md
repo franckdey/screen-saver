@@ -129,6 +129,18 @@ Tous les dossiers utilisent le même utilisateur et le même mot de passe. Avec 
 **Tester la connexion** donne aussi le nombre de photos de chacun ; un dossier injoignable est
 simplement ignoré tant qu'un autre répond.
 
+### Photos de paysages du web
+
+La coche **Ajouter des photos de paysages du web** mélange à tes photos (ou remplace, si
+aucun dossier n'est coché) des photos de paysages de **Wikimedia Commons** : les catégories
+*Featured pictures of landscapes* et *Quality images of landscapes*, plusieurs milliers de
+photos choisies par les contributeurs de Wikimedia. Elles sont sous licence libre
+(Creative Commons ou domaine public) : on a le droit de les télécharger et de les afficher,
+à condition de citer l'auteur. C'est pourquoi chaque photo du web montre toujours son titre,
+son auteur et sa licence (par exemple « Lac d'Annecy · © Marie Dupont, CC BY-SA 4.0 »),
+même quand la légende est décochée. La TV doit avoir accès à Internet ; les photos déjà
+vues restent dans le cache comme les autres.
+
 Le chemin se lit ainsi : `smb://` + **adresse du NAS** + **nom du partage** + dossier(s).
 Quelques exemples courants :
 
@@ -285,6 +297,7 @@ En local : `./gradlew testDebugUnitTest` (les tests Samba sont ignorés sans la 
 - `SlideshowActivity.kt` : le diaporama lancé à la main.
 - `SettingsActivity.kt` : l'écran de réglages pour la télécommande.
 - `PhotoSource.kt`, `SmbPhotoSource.kt` : connexion au partage SMB (bibliothèque *smbj*).
+- `WikimediaSource.kt` : les photos de paysages de Wikimedia Commons, avec auteur et licence.
 - `Updater.kt`, `ApkInstaller.kt` : mise à jour intégrée (vérification sur GitHub,
   téléchargement, installation).
 - `PhotoRepository.kt`, `Images.kt` : ordre aléatoire, téléchargement, cache, réduction,

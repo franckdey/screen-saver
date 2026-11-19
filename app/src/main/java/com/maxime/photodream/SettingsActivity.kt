@@ -41,6 +41,7 @@ class SettingsActivity : Activity() {
     private lateinit var password: EditText
     private lateinit var domain: EditText
     private lateinit var recursive: CheckBox
+    private lateinit var webPhotos: CheckBox
     private lateinit var showFolder: CheckBox
     private lateinit var showClock: CheckBox
     private lateinit var status: TextView
@@ -130,6 +131,8 @@ class SettingsActivity : Activity() {
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dp(8)
         })
+        // photos de paysages sous licence libre, en plus ou à la place des dossiers réseau
+        webPhotos = check(bottom, "Ajouter des photos de paysages du web (Wikimedia Commons, sous licence libre, avec leur auteur affiché)", prefs.webPhotos)
         user = field(bottom, "Utilisateur (laisser vide pour un accès invité)", prefs.user)
         password = field(bottom, "Mot de passe", prefs.password, secret = true)
         domain = field(bottom, "Domaine / groupe de travail (généralement vide)", prefs.domain)
@@ -186,6 +189,7 @@ class SettingsActivity : Activity() {
         prefs.password = password.text.toString()
         prefs.domain = domain.text.toString()
         prefs.recursive = recursive.isChecked
+        prefs.webPhotos = webPhotos.isChecked
         prefs.showFolder = showFolder.isChecked
         prefs.showClock = showClock.isChecked
     }
@@ -233,8 +237,15 @@ class SettingsActivity : Activity() {
             }
             // plusieurs dossiers : le détail de chacun, pour repérer celui qui ne répond pas
             val addresses = prefs.allAddresses
-            if (addresses.size > 1) {
+            if (addresses.size + (if (prefs.webPhotos) 1 else 0) > 1) {
                 val details = withContext(Dispatchers.IO) {
+                    val web = if (!prefs.webPhotos) emptyList() else listOf(
+                        try {
+                            "• ${PhotoRepository.WEB_LABEL} : ${WikimediaSource(File(prefs.filesDir, "credits-web.txt")).listPhotos(false).size} photos"
+                        } catch (e: Exception) {
+                            "• ${PhotoRepository.WEB_LABEL} : échec (${e.message})"
+                        },
+                    )
                     addresses.map { address ->
                         val src = PhotoRepository.smbSourceFor(prefs, address)
                             ?: return@map "• $address : adresse non reconnue"
@@ -245,7 +256,7 @@ class SettingsActivity : Activity() {
                         } finally {
                             runCatching { src.close() }
                         }
-                    }
+                    } + web
                 }
                 status.text = status.text.toString() + "\n" + details.joinToString("\n")
             }

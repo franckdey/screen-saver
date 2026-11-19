@@ -70,7 +70,7 @@ class PhotoRepositoryTest {
     fun `aucun dossier configure`() = runTest {
         val r = repo(null)
         assertEquals(0, r.load())
-        assertTrue(r.lastError!!.startsWith("Aucun dossier réseau configuré"))
+        assertTrue(r.lastError!!.startsWith("Aucun dossier réseau ni photo du web choisi"))
         assertNull(r.nextPhoto(1))
     }
 

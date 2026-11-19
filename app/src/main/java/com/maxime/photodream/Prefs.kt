@@ -1,6 +1,7 @@
 package com.maxime.photodream
 
 import android.content.Context
+import java.io.File
 
 /** Un dossier réseau supplémentaire et sa coche « Utiliser ce dossier ». */
 data class NetFolder(val address: String, val enabled: Boolean = true) {
@@ -31,6 +32,14 @@ data class NetFolder(val address: String, val enabled: Boolean = true) {
 /** Réglages de l'application, stockés localement sur la TV. */
 class Prefs(context: Context) {
     private val sp = context.getSharedPreferences("photodream", Context.MODE_PRIVATE)
+
+    /** Dossier privé de l'appli (crédits des photos du web). */
+    val filesDir: File = context.applicationContext.filesDir
+
+    /** Coche « Photos de paysages du web » (Wikimedia Commons). */
+    var webPhotos: Boolean
+        get() = sp.getBoolean("webPhotos", false)
+        set(v) = sp.edit().putBoolean("webPhotos", v).apply()
 
     /** Ex. smb://192.168.1.20/photo/Vacances ou \\NAS\photo\Vacances */
     var address: String

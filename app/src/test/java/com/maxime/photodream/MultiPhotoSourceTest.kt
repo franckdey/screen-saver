@@ -41,6 +41,23 @@ class MultiPhotoSourceTest {
     }
 
     @Test
+    fun `le nom et le credit viennent du dossier de la photo`() = runBlocking {
+        val nas = Fake("A", listOf("Vacances\\IMG_1.jpg"))
+        val web = object : PhotoSource by Fake("W", listOf("File:Dune.jpg")) {
+            override fun displayName(photo: RemotePhoto) = "Dune (" + photo.path + ")"
+            override fun credit(photo: RemotePhoto) = "© Marie, CC BY 4.0"
+        }
+        val multi = MultiPhotoSource(listOf(MultiPhotoSource.Part("smb://nas/a", nas, ""), MultiPhotoSource.Part("web", web, "web")))
+        val list = multi.listPhotos(true)
+        val dune = list.first { it.path == "@web@File:Dune.jpg" }
+        assertEquals("Dune (File:Dune.jpg)", multi.displayName(dune))
+        assertEquals("© Marie, CC BY 4.0", multi.credit(dune))
+        val img = list.first { it.path == "Vacances\\IMG_1.jpg" }
+        assertEquals("IMG_1", multi.displayName(img))
+        assertEquals(null, multi.credit(img))
+    }
+
+    @Test
     fun `un dossier injoignable n'empeche pas de lire les autres`() = runBlocking {
         val multi = MultiPhotoSource.of(
             listOf("smb://nas/a" to Fake("A", emptyList(), fail = true), "smb://nas/b" to Fake("B", listOf("x.jpg"))),
