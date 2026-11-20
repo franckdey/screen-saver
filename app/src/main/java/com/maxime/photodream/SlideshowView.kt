@@ -135,6 +135,8 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
     private val simpleLoading = HashSet<RemotePhoto>()
     /** Photos illisibles d'affilée : au-delà du nombre de photos, on abandonne. */
     private var simpleFailures = 0
+    /** Photos suivantes trop ressemblantes déjà repoussées pour la photo affichée. */
+    private var simpleDeferred = 0
 
     private var status: String? = "Lecture du dossier réseau… (un gros dossier peut prendre un moment)"
     private var notice: String? = null
@@ -546,6 +548,7 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         simpleFadeStart = now
         simpleEffect = simpleTransition.resolve(simpleEffect)
         simpleFailures = 0
+        simpleDeferred = 0
         player?.shown(now)
     }
 
@@ -556,7 +559,12 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
             val loaded = repo.loadFull(photo)
             simpleLoading.remove(photo)
             val f = player ?: return@launch
-            if (loaded != null) {
+            if (loaded != null && photo == f.peekNext() && photo != f.current && prefs.simpleRandom &&
+                simpleDeferred < MAX_SIMPLE_DEFERRED && Variety.tooClose(simpleShown?.print, loaded.print)
+            ) {
+                // en aléatoire, la suivante ressemble trop à celle affichée : elle passe plus loin
+                if (f.deferNext()) simpleDeferred++ else simpleCache[photo] = loaded
+            } else if (loaded != null) {
                 simpleCache[photo] = loaded
             } else if (photo == f.current) {
                 // photo illisible : on passe à la suivante, sans boucler sans fin
@@ -1016,6 +1024,8 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
 
     companion object {
         private const val TILE_FADE_MS = 700L
+        /** Au plus tant de photos suivantes repoussées pour une même photo, puis on montre la suivante. */
+        private const val MAX_SIMPLE_DEFERRED = 3
         private const val MAX_POOL = 120
         private const val VIEWER_ZOOM_MS = 900L
         /** Sans appui pendant ce temps, la mosaïque figée repart toute seule. */

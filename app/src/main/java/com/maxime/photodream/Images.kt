@@ -93,6 +93,19 @@ object Images {
         return BitmapFactory.decodeFile(file.path, opts)
     }
 
+    /** Empreinte de couleurs de la photo (voir [Variety]), d'après une copie de 32 × 24 pixels. */
+    fun colorPrint(src: Bitmap): FloatArray? = try {
+        val w = 32
+        val h = 24
+        val small = Bitmap.createScaledBitmap(src, w, h, true)
+        val pixels = IntArray(w * h)
+        small.getPixels(pixels, 0, w, 0, 0, w, h)
+        if (small !== src) small.recycle()
+        Variety.print(pixels, w, h)
+    } catch (e: Exception) {
+        null
+    }
+
     /** Fabrique une vignette recadrée au format de la mosaïque, éventuellement floutée. */
     fun makeTile(src: Bitmap, blurLevel: Int): Bitmap {
         val w = TILE_BMP_W

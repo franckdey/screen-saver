@@ -16,12 +16,13 @@ object RandomOrder {
         val byPath = photos.associateBy { it.path }
         val kept = saved.mapNotNull { byPath[it] }.distinct()
         val known = kept.toHashSet()
-        return kept + photos.filter { it !in known }.shuffled(random)
+        // l'ordre est revu pour que deux photos voisines ne viennent pas du même dossier ou sujet
+        return Variety.spreadPhotos(kept + photos.filter { it !in known }.shuffled(random))
     }
 
     /** Nouveau tirage pour le tour suivant, sans recommencer par la photo qui vient de passer. */
     fun reshuffle(previous: List<RemotePhoto>, random: Random = Random.Default): List<RemotePhoto> {
-        val next = previous.shuffled(random).toMutableList()
+        val next = Variety.spreadPhotos(previous.shuffled(random)).toMutableList()
         if (next.size > 1 && next[0] == previous.last()) {
             val j = 1 + random.nextInt(next.size - 1)
             next[0] = next[j].also { next[j] = next[0] }

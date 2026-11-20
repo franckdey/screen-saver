@@ -44,6 +44,20 @@ class PhotoPlayer(
 
     fun next() = go(index + 1)
 
+    /**
+     * La photo suivante ressemble trop à celle affichée : elle passe [by] places plus loin
+     * (ou en dernier), sans sortir du tour en cours. Renvoie faux s'il n'y a pas où la mettre.
+     */
+    fun deferNext(by: Int = 8): Boolean {
+        val from = index + 1
+        if (from >= photos.size - 1) return false
+        val list = photos.toMutableList()
+        val photo = list.removeAt(from)
+        list.add(minOf(from + by, list.size), photo)
+        photos = list
+        return true
+    }
+
     fun previous() = go(index - 1)
 
     /** Met en pause ou relance ; à la reprise, la photo reste encore un intervalle entier. */
