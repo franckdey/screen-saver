@@ -1,6 +1,7 @@
 package com.maxime.photodream
 
 import android.content.Context
+import android.graphics.Color
 import org.robolectric.RuntimeEnvironment
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -215,10 +216,31 @@ class PhotoRepositoryTest {
     @Test
     fun `cache plein, les plus anciennes partent mais pas celle affichee`() = runTest {
         prefs.cacheMb = 0 // on force le nettoyage à chaque passage
-        val r = repo(FakeSource(photos(25)))
+        // des photos aux couleurs toutes différentes : aucune n'est repoussée pour ressemblance
+        val files = (1..25).associate { "Vacances\\Corse\\IMG_$it.jpg" to TestImages.jpeg(640, 480, Color.rgb(it * 10, 255 - it * 10, (it * 37) % 256)) }
+        val r = repo(FakeSource(files))
         r.load()
         repeat(25) { assertNotNull("photo ${it + 1}", r.nextPhoto(0)) }
         assertTrue(cacheDir.listFiles()!!.size < 25)
+    }
+
+    @Test
+    fun `deux photos aux couleurs presque pareilles ne se suivent pas`() = runTest {
+        val twins = setOf("Vacances\\A.jpg", "Vacances\\B.jpg")
+        val files = mapOf(
+            "Vacances\\A.jpg" to TestImages.jpeg(640, 480),
+            "Vacances\\B.jpg" to TestImages.jpeg(640, 480),
+            "Vacances\\C.jpg" to TestImages.jpeg(640, 480, Color.GREEN),
+        )
+        repeat(8) {
+            val r = repo(FakeSource(files))
+            r.clearCache()
+            r.load()
+            val shown = (1..3).map { r.nextPhoto(0)!!.photo!!.path }
+            assertEquals(files.keys, shown.toSet())
+            // la seule façon de les voir à la suite : C d'abord, il ne reste alors qu'elles deux
+            assertFalse("$shown", shown[0] in twins && shown[1] in twins)
+        }
     }
 
     @Test

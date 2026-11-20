@@ -10,11 +10,11 @@ import java.io.File
 
 /** Fabrique de vraies photos JPEG pour les tests. */
 object TestImages {
-    /** Une photo coupée en deux : moitié gauche rouge, moitié droite bleue. */
-    fun jpeg(width: Int, height: Int): ByteArray {
+    /** Une photo coupée en deux : moitié gauche rouge, moitié droite bleue (ou de la couleur [right]). */
+    fun jpeg(width: Int, height: Int, right: Int = Color.BLUE): ByteArray {
         val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
-        canvas.drawColor(Color.BLUE)
+        canvas.drawColor(right)
         canvas.drawRect(0f, 0f, width / 2f, height.toFloat(), Paint().apply { color = Color.RED })
         val out = ByteArrayOutputStream()
         bmp.compress(Bitmap.CompressFormat.JPEG, 92, out)
