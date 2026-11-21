@@ -10,7 +10,14 @@ import java.io.File
 import java.security.MessageDigest
 
 /** Une photo prête à être affichée en grand ; [photo] dit de quel fichier elle vient. */
-class LoadedPhoto(val full: Bitmap, val tile: Bitmap, val label: String, val photo: RemotePhoto? = null)
+class LoadedPhoto(
+    val full: Bitmap,
+    val tile: Bitmap,
+    val label: String,
+    val photo: RemotePhoto? = null,
+    /** Empreinte de couleurs (voir [Variety]), pour ne pas enchaîner deux photos presque pareilles. */
+    val print: FloatArray? = null,
+)
 
 /** Vignette de la mosaïque et la photo dont elle vient (pour l'agrandir ensuite). */
 class TileImage(val bitmap: Bitmap, val photo: RemotePhoto)
@@ -173,16 +180,45 @@ class PhotoRepository(
 
     /** Photo suivante (ordre aléatoire, sans répétition avant d'avoir tout vu). */
     suspend fun nextPhoto(blurLevel: Int): LoadedPhoto? = withContext(Dispatchers.IO) {
+        var deferred = 0
         repeat(MAX_ATTEMPTS) {
             val photo = nextRemote() ?: return@withContext null
-            load(photo, blurLevel)?.let { return@withContext it }
+            // en aléatoire, une photo aux couleurs presque pareilles à la précédente attend un peu
+            var tooClose = false
+            val reject: ((FloatArray) -> Boolean)? = if (prefs.mosaicRandom && deferred < MAX_DEFERRED) {
+                { print -> Variety.tooClose(lastPrint, print).also { tooClose = it } }
+            } else {
+                null
+            }
+            val loaded = load(photo, blurLevel, reject = reject)
+            if (loaded == null && tooClose) {
+                deferred++
+                defer(photo)
+                return@repeat
+            }
+            loaded?.let {
+                lastPrint = it.print
+                return@withContext it
+            }
         }
         null
     }
 
+    /** Empreinte de la dernière photo montrée en grand dans la mosaïque. */
+    @Volatile private var lastPrint: FloatArray? = null
+
+    /** Remet la photo un peu plus loin dans la file, pour plus tard dans ce tour. */
+    @Synchronized
+    private fun defer(photo: RemotePhoto) {
+        val list = queue.toMutableList()
+        list.add(minOf(DEFER_BY, list.size), photo)
+        queue.clear()
+        queue.addAll(list)
+    }
+
     /** Charge en grand une photo précise, par exemple celle d'une vignette visible. */
     suspend fun loadPhoto(photo: RemotePhoto, blurLevel: Int): LoadedPhoto? =
-        withContext(Dispatchers.IO) { load(photo, blurLevel) }
+        withContext(Dispatchers.IO) { load(photo, blurLevel)?.also { lastPrint = it.print } }
 
     /**
      * Charge une photo pour le diaporama simple : pas de vignette floutée à préparer.
@@ -195,7 +231,8 @@ class PhotoRepository(
     fun orderedPhotos(): List<RemotePhoto> = PhotoPlayer.ordered(photos)
 
     /** Ordre des photos en grand de la mosaïque : aléatoire ou dossier par dossier, selon le réglage. */
-    private fun order(list: List<RemotePhoto>) = if (prefs.mosaicRandom) list.shuffled() else PhotoPlayer.ordered(list)
+    private fun order(list: List<RemotePhoto>) =
+        if (prefs.mosaicRandom) Variety.spreadPhotos(list.shuffled()) else PhotoPlayer.ordered(list)
 
     /** Diaporama simple en ordre aléatoire : l'ordre mémorisé, complété des nouvelles photos. */
     fun randomOrderPhotos(): List<RemotePhoto> {
@@ -215,7 +252,12 @@ class PhotoRepository(
         }
     }
 
-    private suspend fun load(photo: RemotePhoto, blurLevel: Int, withTile: Boolean = true): LoadedPhoto? {
+    private suspend fun load(
+        photo: RemotePhoto,
+        blurLevel: Int,
+        withTile: Boolean = true,
+        reject: ((FloatArray) -> Boolean)? = null,
+    ): LoadedPhoto? {
         val file = localFile(photo) ?: run {
             markSeen(photo) // illisible : on la saute pour ce tour au lieu de la redemander
             return null
@@ -226,9 +268,15 @@ class PhotoRepository(
             markSeen(photo)
             return null
         }
+        val print = Images.colorPrint(full)
+        if (print != null && reject?.invoke(print) == true) {
+            // pas vue : elle reviendra un peu plus tard
+            full.recycle()
+            return null
+        }
         val label = caption(photo, file)
         markSeen(photo)
-        return LoadedPhoto(full, if (withTile) Images.makeTile(full, blurLevel) else full, label, photo)
+        return LoadedPhoto(full, if (withTile) Images.makeTile(full, blurLevel) else full, label, photo, print)
     }
 
     /** Vrai si la photo a déjà été montrée en grand pendant ce tour. */
@@ -478,6 +526,10 @@ class PhotoRepository(
         private const val WEB_TAG = "web"
         private const val CACHE_PREFIX = "cache:"
         private const val MAX_ATTEMPTS = 8
+        /** Photos trop ressemblantes écartées au plus avant d'en prendre une quand même. */
+        private const val MAX_DEFERRED = 3
+        /** De combien de places une photo trop ressemblante recule dans la file. */
+        private const val DEFER_BY = 10
         /** L'EXIF est au début du fichier : 256 Ko suffisent largement. */
         private const val EXIF_HEAD = 256 * 1024
     }

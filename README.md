@@ -192,6 +192,10 @@ rapide entre deux photos.
   l'autre ; une fois tout vu, un nouvel ordre est tiré.
 - Le réglage **« Ordre des photos de la mosaïque »** fait de même pour la mosaïque (aléatoire par
   défaut, ou dossier par dossier).
+- En aléatoire, deux photos qui se suivent sont vraiment différentes : jamais deux photos du même
+  dossier (ou, pour le web, du même sujet, comme « Lake Bled » et « Lake Bled from the castle »)
+  à moins de trois photos d'écart, et une photo aux couleurs presque pareilles à la précédente
+  (deux couchers de soleil sur la mer…) passe un peu plus loin dans le tour.
 
 | Touche ou appui | Effet |
 |---|---|
@@ -300,5 +304,6 @@ En local : `./gradlew testDebugUnitTest` (les tests Samba sont ignorés sans la 
 - `WikimediaSource.kt` : les photos de paysages de Wikimedia Commons, avec auteur et licence.
 - `Updater.kt`, `ApkInstaller.kt` : mise à jour intégrée (vérification sur GitHub,
   téléchargement, installation).
+- `Variety.kt` : pour que deux photos voisines soient différentes (groupe et couleurs, testé).
 - `PhotoRepository.kt`, `Images.kt` : ordre aléatoire, téléchargement, cache, réduction,
   rotation EXIF et flou des vignettes.
