@@ -51,6 +51,15 @@ class Timeline(private val holdMs: Long) {
         skipRequested = false
     }
 
+    /**
+     * Le déroulé s'est arrêté pendant [ms] (zoom dans la photo) : tout repart d'où il en était,
+     * la photo garde le temps d'affichage qui lui restait.
+     */
+    fun shift(ms: Long) {
+        phaseStart += ms
+        pausedAt += ms
+    }
+
     /** Passe tout de suite à la photo suivante. */
     fun skip() {
         paused = false

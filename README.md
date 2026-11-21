@@ -171,6 +171,7 @@ Les dossiers techniques (`@eaDir` de Synology, `#recycle`, fichiers cachés) son
 | Flèche droite | passe tout de suite à la photo suivante |
 | Flèche gauche | revient à la photo précédente ; chaque appui remonte d'une photo de plus, puis le diaporama reprend la suite |
 | Flèche bas | fige la mosaïque : un cadre jaune se déplace avec les quatre flèches, OK agrandit la photo choisie, OK ou Retour la renvoie dans la mosaïque, Retour reprend le diaporama (tout seul au bout de 3 minutes sans appui) |
+| Flèche haut | zoome dans la photo affichée en grand (voir « Zoomer dans une photo » plus bas) |
 | Retour, Accueil ou autre touche | quitte l'économiseur |
 
 Sur téléphone, un appui sur l'écran fixe ou relance la photo. Un appui long fige la mosaïque : touchez alors une vignette pour l'agrandir, et touchez à côté des vignettes pour reprendre.
@@ -204,9 +205,29 @@ rapide entre deux photos.
 | OK, ou appui au milieu de l'écran | pause / reprise |
 | Retour | quitte |
 
+| Flèche haut | zoome dans la photo (voir ci-dessous) |
+
 Le diaporama reprend là où il s'était arrêté la fois précédente. Le lieu et la date (ou le
 dossier et le nom) s'affichent en bas à gauche, la position (« 12 / 340 ») en bas à droite.
 Les photos regardées comptent comme vues pour la mosaïque, comme d'habitude.
+
+### Zoomer dans une photo
+
+Quand une photo est affichée en grand (mosaïque, photo choisie avec la flèche bas, ou diaporama
+simple), **flèche haut** zoome ×2 au centre de la photo et arrête le diaporama.
+
+| Touche | Pendant le zoom |
+|---|---|
+| Flèches | se déplacer dans la photo (maintenir la flèche pour aller plus loin) |
+| OK | zoomer plus : ×3, puis ×4 |
+| Retour | dézoomer d'un cran ; à ×2, quitte le zoom et le diaporama reprend |
+| Lecture/Pause | quitte le zoom directement |
+
+Un petit plan en bas à droite montre la photo entière, avec en jaune la partie visible. Pour que
+le zoom reste net, PhotoDream relit l'original sur le NAS (jusqu'à 4096 pixels de côté) : la photo
+devient plus nette une ou deux secondes après le début du zoom. Hors ligne, c'est la copie du
+cache, moins nette. Sans appui pendant 3 minutes, le zoom s'arrête et le diaporama reprend.
+Sur téléphone, un appui sur l'écran quitte le zoom.
 
 ---
 
@@ -297,6 +318,7 @@ En local : `./gradlew testDebugUnitTest` (les tests Samba sont ignorés sans la 
 - `SlideshowView.kt` : le dessin de l'animation (vignettes, zoom, cadre, textes).
 - `Timeline.kt` : le déroulé de chaque photo, la pause et la reprise (sans dessin, testé).
 - `PhotoPlayer.kt` : l'ordre et la minuterie du diaporama simple (sans dessin, testé).
+- `PhotoZoom.kt` : le zoom dans une photo, crans et déplacements (sans dessin, testé).
 - `PhotoDreamService.kt` : l'économiseur d'écran Android (*DreamService*).
 - `SlideshowActivity.kt` : le diaporama lancé à la main.
 - `SettingsActivity.kt` : l'écran de réglages pour la télécommande.

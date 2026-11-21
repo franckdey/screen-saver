@@ -8,6 +8,8 @@ import android.view.KeyEvent
  * Selon le réglage, c'est la mosaïque animée ou le diaporama simple.
  * OK fixe la photo / relance, flèche droite passe à la suivante, flèche gauche revient à la précédente,
  * flèche bas fige la mosaïque pour choisir une photo à agrandir (Retour pour reprendre),
+ * flèche haut zoome dans la photo affichée en grand (flèches pour s'y déplacer, OK pour zoomer plus,
+ * Retour pour dézoomer),
  * toute autre touche quitte l'économiseur comme d'habitude.
  */
 class PhotoDreamService : DreamService() {
@@ -27,8 +29,20 @@ class PhotoDreamService : DreamService() {
         if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
             event.keyCode == KeyEvent.KEYCODE_VOLUME_MUTE
         ) return super.dispatchKeyEvent(event)
+        // pendant le zoom, les flèches agissent dès l'appui et se répètent tant qu'on les tient
+        if (v.zoomed && event.keyCode in ARROWS) {
+            if (event.action == KeyEvent.ACTION_DOWN) v.handleKey(event.keyCode)
+            return true
+        }
         // OK, flèches et, pendant le choix d'une photo, Retour ; toute autre touche quitte
         if (event.action == KeyEvent.ACTION_UP && !v.handleKey(event.keyCode)) finish()
         return true
+    }
+
+    private companion object {
+        val ARROWS = setOf(
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+        )
     }
 }
