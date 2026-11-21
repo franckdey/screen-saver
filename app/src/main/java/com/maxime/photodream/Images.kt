@@ -21,6 +21,9 @@ object Images {
     private const val MAX_W = 1920
     private const val MAX_H = 1080
 
+    /** Côté maximal de la version nette chargée pour le zoom (×4 sur un écran Full HD). */
+    const val ZOOM_MAX_SIDE = 4096
+
     /** Proportions des vignettes de la mosaïque. */
     const val TILE_ASPECT = 4f / 3f
     private const val TILE_BMP_W = 320
@@ -30,25 +33,44 @@ object Images {
      * la remet à l'endroit d'après l'EXIF et l'écrit en JPEG dans [out].
      */
     fun downscaleToJpeg(bytes: ByteArray, out: File): Boolean {
+        val bmp = decodeScaled(bytes, MAX_W, MAX_H, Bitmap.Config.ARGB_8888) ?: return false
+        return writeJpeg(bmp, out)
+    }
+
+    /**
+     * Version nette d'une photo originale pour le zoom : jusqu'à [maxSide] pixels de côté, remise à
+     * l'endroit comme la copie du cache. En RGB 565 (deux fois moins de mémoire), et null si la photo
+     * ne tient pas en mémoire.
+     */
+    fun decodeLarge(bytes: ByteArray, maxSide: Int = ZOOM_MAX_SIDE): Bitmap? = try {
+        decodeScaled(bytes, maxSide, maxSide, Bitmap.Config.RGB_565)
+    } catch (e: OutOfMemoryError) {
+        null
+    }
+
+    /** Décode la photo à l'endroit d'après l'EXIF, réduite pour tenir dans [maxW] × [maxH]. */
+    private fun decodeScaled(bytes: ByteArray, maxW: Int, maxH: Int, config: Bitmap.Config): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
             // Format que BitmapFactory ne lit pas (certains HEIC…) : ImageDecoder, Android 9+.
-            val bmp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) decodeModern(bytes) else null
-            return bmp != null && writeJpeg(bmp, out)
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) decodeModern(bytes, maxW, maxH, config) else null
         }
 
         val rotation = exifRotation(bytes)
         val rotatedW = if (rotation % 180 == 0) bounds.outWidth else bounds.outHeight
         val rotatedH = if (rotation % 180 == 0) bounds.outHeight else bounds.outWidth
-        val scale = min(MAX_W.toFloat() / rotatedW, MAX_H.toFloat() / rotatedH).coerceAtMost(1f)
+        val scale = min(maxW.toFloat() / rotatedW, maxH.toFloat() / rotatedH).coerceAtMost(1f)
 
-        val opts = BitmapFactory.Options().apply { inSampleSize = sampleSizeFor(scale) }
-        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return false
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = sampleSizeFor(scale)
+            inPreferredConfig = config
+        }
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return null
 
         val dw = if (rotation % 180 == 0) decoded.width else decoded.height
         val dh = if (rotation % 180 == 0) decoded.height else decoded.width
-        val finalScale = min(MAX_W.toFloat() / dw, MAX_H.toFloat() / dh).coerceAtMost(1f)
+        val finalScale = min(maxW.toFloat() / dw, maxH.toFloat() / dh).coerceAtMost(1f)
         val matrix = Matrix().apply {
             if (rotation != 0) postRotate(rotation.toFloat())
             if (finalScale < 1f) postScale(finalScale, finalScale)
@@ -57,7 +79,7 @@ object Images {
         else Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
 
         if (result !== decoded) decoded.recycle()
-        return writeJpeg(result, out)
+        return result
     }
 
     private fun writeJpeg(bmp: Bitmap, out: File): Boolean {
@@ -67,15 +89,16 @@ object Images {
         return ok && tmp.renameTo(out)
     }
 
-    /** Décodage par ImageDecoder (remet aussi la photo à l'endroit), réduit au plein écran. */
+    /** Décodage par ImageDecoder (remet aussi la photo à l'endroit), réduit pour tenir dans [maxW] × [maxH]. */
     @android.annotation.TargetApi(Build.VERSION_CODES.P)
-    private fun decodeModern(bytes: ByteArray): Bitmap? = try {
+    private fun decodeModern(bytes: ByteArray, maxW: Int, maxH: Int, config: Bitmap.Config): Bitmap? = try {
         ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
             val w = info.size.width
             val h = info.size.height
-            val scale = min(MAX_W.toFloat() / max(w, h), MAX_H.toFloat() / min(w, h)).coerceAtMost(1f)
+            val scale = min(maxW.toFloat() / max(w, h), maxH.toFloat() / min(w, h)).coerceAtMost(1f)
             decoder.setTargetSize(max(1, (w * scale).roundToInt()), max(1, (h * scale).roundToInt()))
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            if (config == Bitmap.Config.RGB_565) decoder.memorySizePolicy = ImageDecoder.MEMORY_POLICY_LOW_RAM
         }
     } catch (e: Exception) {
         null

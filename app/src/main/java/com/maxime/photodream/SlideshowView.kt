@@ -118,6 +118,22 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         color = Color.rgb(255, 204, 0)
     }
 
+    // --- Zoom dans la photo affichée (flèche haut) ---------------------------------------------
+
+    /** Zoom en cours : le diaporama est arrêté, les flèches se déplacent dans la photo. */
+    private var zoom: PhotoZoom? = null
+    private var zoomPhoto: LoadedPhoto? = null
+    /** Ce qu'on dessine : la copie du cache, puis l'original plus net une fois relu. */
+    private var zoomBitmap: Bitmap? = null
+    private var zoomStartedAt = 0L
+    /** Le diaporama simple était déjà en pause avant le zoom : il y reste après. */
+    private var zoomWasPaused = false
+    private var zoomGen = 0
+    private val minimapPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+
+    /** Vrai pendant le zoom : les flèches servent alors à se déplacer, maintenues ou non. */
+    val zoomed get() = zoom != null
+
     // --- Diaporama simple ---------------------------------------------------------------------
 
     /** Ordre et minuterie du diaporama simple, une fois la liste des photos lue. */
@@ -180,7 +196,7 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
 
         /** Appui long : fige la mosaïque pour choisir une photo du bout du doigt. */
         override fun onLongPress(e: MotionEvent) {
-            if (!simple && !selecting) {
+            if (!simple && !selecting && zoom == null) {
                 enterSelection()
                 tileAt(e.x, e.y)?.let { cursor = it }
             }
@@ -202,6 +218,10 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
     /** Appui à l'écran : dans le diaporama simple, le tiers gauche recule et le tiers droit avance. */
     private fun tap(x: Float, y: Float) {
         lastKeyAt = SystemClock.uptimeMillis()
+        if (zoom != null) {
+            exitZoom()
+            return
+        }
         if (selecting) {
             when {
                 viewer != null || viewerLoading -> closeViewer()
@@ -322,12 +342,13 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
      */
     fun handleKey(code: Int): Boolean {
         lastKeyAt = SystemClock.uptimeMillis()
+        if (zoom != null) return zoomKey(code)
         if (selecting) {
             val viewing = viewer != null || viewerLoading
             when (code) {
                 KeyEvent.KEYCODE_DPAD_LEFT -> if (viewing) closeViewer() else moveCursor(-1, 0)
                 KeyEvent.KEYCODE_DPAD_RIGHT -> if (viewing) closeViewer() else moveCursor(1, 0)
-                KeyEvent.KEYCODE_DPAD_UP -> if (viewing) closeViewer() else moveCursor(0, -1)
+                KeyEvent.KEYCODE_DPAD_UP -> if (!viewing) moveCursor(0, -1) else if (!startZoom()) closeViewer()
                 KeyEvent.KEYCODE_DPAD_DOWN -> if (viewing) closeViewer() else moveCursor(0, 1)
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER ->
                     if (viewing) closeViewer() else openCursor()
@@ -342,9 +363,76 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
             KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_NEXT -> skip()
             KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> previous()
             KeyEvent.KEYCODE_DPAD_DOWN -> if (simple) return false else enterSelection()
+            KeyEvent.KEYCODE_DPAD_UP -> if (!startZoom()) {
+                showNotice("Flèche haut zoome dans une photo affichée en grand", 3_000)
+            }
             else -> return false
         }
         return true
+    }
+
+    /** Pendant le zoom : flèches = se déplacer, OK = zoomer plus, Retour = dézoomer puis reprendre. */
+    private fun zoomKey(code: Int): Boolean {
+        val z = zoom ?: return false
+        when (code) {
+            KeyEvent.KEYCODE_DPAD_LEFT -> z.pan(-1, 0)
+            KeyEvent.KEYCODE_DPAD_RIGHT -> z.pan(1, 0)
+            KeyEvent.KEYCODE_DPAD_UP -> z.pan(0, -1)
+            KeyEvent.KEYCODE_DPAD_DOWN -> z.pan(0, 1)
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER ->
+                if (!z.zoomIn()) showNotice("Zoom maximum · Retour pour dézoomer", 2_500)
+            KeyEvent.KEYCODE_BACK -> if (!z.zoomOut()) exitZoom()
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> exitZoom()
+            else -> return false
+        }
+        return true
+    }
+
+    /** La photo affichée en grand en ce moment, s'il y en a une. */
+    private fun zoomTarget(now: Long): LoadedPhoto? = when {
+        simple -> simpleShown
+        selecting -> viewer?.takeIf { !viewerClosing && viewerZoom(now) >= 0.999f }
+        else -> current?.takeIf { fgZoom >= 0.999f && fgAlpha >= 1f }
+    }
+
+    /** Zoome ×2 au centre de la photo affichée et arrête le diaporama. Faux s'il n'y a rien à zoomer. */
+    private fun startZoom(): Boolean {
+        val now = SystemClock.uptimeMillis()
+        val target = zoomTarget(now) ?: return false
+        val bmp = target.full
+        // on part de la taille à laquelle la photo était dessinée (avec sa marge dans la mosaïque)
+        val start = if (simple) 1f else 0.95f
+        zoom = PhotoZoom(start).also { it.setSizes(width.toFloat(), height.toFloat(), bmp.width.toFloat(), bmp.height.toFloat()) }
+        zoomPhoto = target
+        zoomBitmap = bmp
+        zoomStartedAt = now
+        player?.let { f ->
+            zoomWasPaused = f.paused
+            if (!f.paused) f.togglePause(now)
+        }
+        showNotice("Flèches : se déplacer · OK : zoomer plus · Retour : dézoomer", 6_000)
+        // l'original, plus net que la copie réduite à la taille de l'écran
+        val photo = target.photo ?: return true
+        val gen = ++zoomGen
+        scope?.launch {
+            val sharp = repo.loadOriginal(photo) ?: return@launch
+            val ratio = sharp.width.toFloat() / sharp.height / (bmp.width.toFloat() / bmp.height)
+            if (gen == zoomGen && zoom != null && ratio in 0.98f..1.02f && sharp.width > bmp.width) zoomBitmap = sharp
+        }
+        return true
+    }
+
+    /** Fin du zoom : le diaporama reprend là où il s'était arrêté. */
+    private fun exitZoom() {
+        if (zoom == null) return
+        val now = SystemClock.uptimeMillis()
+        zoom = null
+        zoomPhoto = null
+        zoomBitmap = null
+        zoomGen++
+        timeline.shift(now - zoomStartedAt)
+        player?.let { f -> if (!zoomWasPaused && f.paused) f.togglePause(now) }
+        showNotice("Reprise du diaporama", 2_500)
     }
 
     private fun enterSelection() {
@@ -697,8 +785,13 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         lastFrame = now
         canvas.drawColor(Color.BLACK)
 
+        val z = zoom
+        // sans appui pendant un moment, le zoom s'arrête et le diaporama reprend
+        if (z != null && now - lastKeyAt > ZOOM_IDLE_MS) exitZoom()
         val f = player
-        if (simple) {
+        if (z != null && zoom != null) {
+            drawZoom(canvas, z, dt)
+        } else if (simple) {
             if (f != null) {
                 if (f.update(now)) {
                     simpleForward = true
@@ -962,6 +1055,46 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         textPaint.textSize = normal
     }
 
+    /** La photo zoomée, et en bas à droite un plan de la photo avec la partie visible en jaune. */
+    private fun drawZoom(canvas: Canvas, z: PhotoZoom, dt: Long) {
+        val bmp = zoomBitmap ?: return
+        val bw = bmp.width.toFloat()
+        val bh = bmp.height.toFloat()
+        z.setSizes(width.toFloat(), height.toFloat(), bw, bh)
+        z.step(dt)
+        val k = min(width / bw, height / bh) * z.shownScale
+        matrix.setScale(k, k)
+        matrix.postTranslate(width / 2f - z.shownX * bw * k, height / 2f - z.shownY * bh * k)
+        canvas.drawBitmap(bmp, matrix, bitmapPaint)
+
+        // plan de la photo entière, d'après la copie réduite (plus légère à dessiner)
+        val small = zoomPhoto?.full ?: bmp
+        val short = min(width, height).toFloat()
+        val mapScale = min(short * 0.28f / small.width, short * 0.2f / small.height)
+        val mw = small.width * mapScale
+        val mh = small.height * mapScale
+        val margin = short * 0.04f
+        frameRect.set(width - margin - mw, height - margin - mh, width - margin, height - margin)
+        framePaint.alpha = 200
+        val b = max(2f, short * 0.003f)
+        canvas.drawRect(frameRect.left - b, frameRect.top - b, frameRect.right + b, frameRect.bottom + b, framePaint)
+        bitmapPaint.alpha = 220
+        canvas.drawBitmap(small, null, frameRect, bitmapPaint)
+        bitmapPaint.alpha = 255
+        val v = z.visible()
+        minimapPaint.color = Color.rgb(255, 204, 0)
+        minimapPaint.strokeWidth = max(2f, short * 0.004f)
+        canvas.drawRect(
+            frameRect.left + v[0] * mw, frameRect.top + v[1] * mh,
+            frameRect.left + v[2] * mw, frameRect.top + v[3] * mh, minimapPaint,
+        )
+        val size = labelSize
+        val normal = textPaint.textSize
+        textPaint.textSize = size
+        drawText(canvas, "×" + z.scale.toInt(), frameRect.right, frameRect.top - size * 0.6f, 0.9f, Paint.Align.RIGHT)
+        textPaint.textSize = normal
+    }
+
     /** La photo entière à l'écran, avec l'opacité, le décalage, le zoom et la découpe de [layer]. */
     private fun drawFitted(canvas: Canvas, bmp: Bitmap, layer: Layer) {
         if (layer.alpha <= 0f || layer.clipTo <= layer.clipFrom) return
@@ -1030,5 +1163,7 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         private const val VIEWER_ZOOM_MS = 900L
         /** Sans appui pendant ce temps, la mosaïque figée repart toute seule. */
         private const val SELECT_IDLE_MS = 3 * 60_000L
+        /** Sans appui pendant ce temps, le zoom s'arrête et le diaporama reprend. */
+        private const val ZOOM_IDLE_MS = 3 * 60_000L
     }
 }

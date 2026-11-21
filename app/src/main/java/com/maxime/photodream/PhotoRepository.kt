@@ -227,6 +227,24 @@ class PhotoRepository(
     suspend fun loadFull(photo: RemotePhoto): LoadedPhoto? =
         withContext(Dispatchers.IO) { load(photo, 0, withTile = false) }
 
+    /**
+     * L'original de la photo, relu sur le NAS (ou le web) en plus grand que la copie du cache,
+     * pour que le zoom reste net. Null hors ligne, ou si elle ne tient pas en mémoire.
+     */
+    suspend fun loadOriginal(photo: RemotePhoto): Bitmap? = withContext(Dispatchers.IO) {
+        val src = source
+        if (src == null || photo.path.startsWith(CACHE_PREFIX)) return@withContext null
+        try {
+            Images.decodeLarge(src.read(photo.path))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        } catch (e: OutOfMemoryError) {
+            null
+        }
+    }
+
     /** Toutes les photos, dossier par dossier et par nom, pour le diaporama simple. */
     fun orderedPhotos(): List<RemotePhoto> = PhotoPlayer.ordered(photos)
 

@@ -171,4 +171,18 @@ class TimelineTest {
         assertFalse(timeline.paused)
         assertTrue(Event.START_PHOTO in advance(PAUSE_MS + 50))
     }
+
+    @Test
+    fun `apres un zoom la photo garde le temps qui lui restait`() {
+        startPhoto()
+        advance(FADE_MS + ZOOM_MS + hold / 2)
+        assertEquals(Phase.HOLD, timeline.phase)
+        // zoom de 5 minutes : le déroulé ne tourne pas pendant ce temps
+        now += 300_000
+        timeline.shift(300_000)
+        advance(hold / 2 - 100)
+        assertEquals(Phase.HOLD, timeline.phase)
+        advance(200)
+        assertEquals(Phase.ZOOM_OUT, timeline.phase)
+    }
 }
