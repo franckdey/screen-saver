@@ -530,11 +530,12 @@ class PhotoRepository(
             }
         }
 
-        /** Un seul dossier réseau, avec les identifiants réglés ; null si l'adresse n'est pas valable. */
+        /** Un seul dossier réseau, avec ses identifiants ; null si l'adresse n'est pas valable. */
         fun smbSourceFor(prefs: Prefs, address: String): SmbPhotoSource? {
             val location = SmbLocation.parse(address) ?: return null
+            val login = prefs.loginFor(address)
             return SmbPhotoSource(
-                location, prefs.user, prefs.password, prefs.domain,
+                location, login.user, login.password, login.domain,
                 compat = prefs.smbCompat,
                 onCompat = { prefs.smbCompat = true },
             )

@@ -3,18 +3,43 @@ package com.maxime.photodream
 import android.content.Context
 import java.io.File
 
-/** Un dossier réseau supplémentaire et sa coche « Utiliser ce dossier ». */
-data class NetFolder(val address: String, val enabled: Boolean = true) {
+/**
+ * Un dossier réseau supplémentaire et sa coche « Utiliser ce dossier ». [user] et [password] servent
+ * pour un autre NAS qui a ses propres identifiants ; vides, ce sont ceux du dossier principal.
+ */
+data class NetFolder(
+    val address: String,
+    val enabled: Boolean = true,
+    val user: String = "",
+    val password: String = "",
+) {
+    /** Ce dossier a-t-il ses propres identifiants ? */
+    val ownLogin: Boolean get() = user.isNotBlank()
+
     companion object {
-        /** Une ligne par dossier ; « # » devant l'adresse d'un dossier décoché. */
-        fun parse(text: String): List<NetFolder> = text.lines().map { it.trim() }.filter { it.isNotEmpty() }.map {
-            if (it.startsWith("#")) NetFolder(it.substring(1).trim(), false) else NetFolder(it)
+        /**
+         * Une ligne par dossier ; « # » devant l'adresse d'un dossier décoché. Les identifiants
+         * propres suivent l'adresse, séparés par une tabulation et encodés.
+         */
+        fun parse(text: String): List<NetFolder> = text.lines().map { it.trim() }.filter { it.isNotEmpty() }.map { line ->
+            val parts = line.split('\t')
+            val raw = parts[0].trim()
+            val enabled = !raw.startsWith("#")
+            NetFolder(
+                address = (if (enabled) raw else raw.substring(1)).trim(),
+                enabled = enabled,
+                user = parts.getOrNull(1)?.let(::decode) ?: "",
+                password = parts.getOrNull(2)?.let(::decode) ?: "",
+            )
         }.filter { it.address.isNotEmpty() }
 
         fun serialize(folders: List<NetFolder>): String = folders
-            .map { it.copy(address = it.address.trim()) }
+            .map { it.copy(address = it.address.trim(), user = it.user.trim()) }
             .filter { it.address.isNotEmpty() }
-            .joinToString("\n") { if (it.enabled) it.address else "#" + it.address }
+            .joinToString("\n") {
+                val head = if (it.enabled) it.address else "#" + it.address
+                if (it.ownLogin) head + "\t" + encode(it.user) + "\t" + encode(it.password) else head
+            }
 
         /** Les dossiers cochés et remplis, sans doublon, le principal en premier. */
         fun enabled(main: String, mainOn: Boolean, extras: List<NetFolder>): List<Pair<String, Boolean>> {
@@ -26,8 +51,25 @@ data class NetFolder(val address: String, val enabled: Boolean = true) {
             }
             return out
         }
+
+        /**
+         * Utilisateur, mot de passe et domaine pour lire [address] : ceux du dossier supplémentaire
+         * s'il a les siens, sinon ceux du dossier principal.
+         */
+        fun login(address: String, main: String, mainLogin: Login, extras: List<NetFolder>): Login {
+            val a = address.trim()
+            if (a == main.trim()) return mainLogin
+            val own = extras.firstOrNull { it.address.trim() == a && it.ownLogin } ?: return mainLogin
+            return Login(own.user.trim(), own.password, "")
+        }
+
+        private fun encode(v: String) = java.net.URLEncoder.encode(v, "UTF-8")
+        private fun decode(v: String) = runCatching { java.net.URLDecoder.decode(v, "UTF-8") }.getOrDefault(v)
     }
 }
+
+/** Identifiants d'un NAS. */
+data class Login(val user: String, val password: String, val domain: String)
 
 /** Réglages de l'application, stockés localement sur la TV. */
 class Prefs(context: Context) {
@@ -51,7 +93,7 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("addressEnabled", true)
         set(v) = sp.edit().putBoolean("addressEnabled", v).apply()
 
-    /** Dossiers réseau supplémentaires, lus en plus de [address] avec les mêmes identifiants. */
+    /** Dossiers réseau supplémentaires, lus en plus de [address] (avec leurs propres identifiants s'ils en ont). */
     var extraFolders: List<NetFolder>
         get() = NetFolder.parse(sp.getString("extraAddresses", "") ?: "")
         set(v) = sp.edit().putString("extraAddresses", NetFolder.serialize(v)).apply()
@@ -75,6 +117,9 @@ class Prefs(context: Context) {
     var domain: String
         get() = sp.getString("domain", "") ?: ""
         set(v) = sp.edit().putString("domain", v.trim()).apply()
+
+    /** Les identifiants à utiliser pour ce dossier réseau. */
+    fun loginFor(address: String): Login = NetFolder.login(address, this.address, Login(user, password, domain), extraFolders)
 
     /** Mode SMB « compatible » (SMB 2, sans chiffrement), choisi automatiquement si le NAS bloque les lectures. */
     var smbCompat: Boolean

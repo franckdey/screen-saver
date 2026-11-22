@@ -38,9 +38,10 @@ class PhotoDiagnostic(
             else -> return src.read(path).also { step("3. Téléchargée : ${it.size / 1024} Ko (${elapsed()})") }
         }
         val location = SmbLocation.parse(address) ?: return null
+        val login = prefs.loginFor(address)
         for (compat in listOf(false, true)) {
             val label = if (compat) "mode compatible SMB 2" else "mode normal"
-            val source = SmbPhotoSource(location, prefs.user, prefs.password, prefs.domain, compat = compat, autoCompat = false)
+            val source = SmbPhotoSource(location, login.user, login.password, login.domain, compat = compat, autoCompat = false)
             var received = 0L
             step("3. Téléchargement ($label)…")
             try {

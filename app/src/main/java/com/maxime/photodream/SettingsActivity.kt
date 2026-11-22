@@ -33,8 +33,11 @@ class SettingsActivity : Activity() {
     private val scope = MainScope()
     private lateinit var prefs: Prefs
     private lateinit var address: EditText
-    /** Dossiers réseau supplémentaires, un champ chacun. */
-    private val extraFields = ArrayList<Pair<EditText, CheckBox>>()
+    /** Un dossier réseau supplémentaire à l'écran : adresse, coche et identifiants propres. */
+    private class ExtraField(val address: EditText, val enabled: CheckBox, val user: EditText, val password: EditText)
+
+    /** Dossiers réseau supplémentaires, un bloc chacun. */
+    private val extraFields = ArrayList<ExtraField>()
     private lateinit var addressEnabled: CheckBox
     private lateinit var extraBox: LinearLayout
     private lateinit var user: EditText
@@ -122,21 +125,21 @@ class SettingsActivity : Activity() {
         val bottom = section(root, "Dossier réseau et tests")
         address = field(bottom, "Dossier réseau (ex. smb://192.168.1.254/Freebox/etc...)", prefs.address)
         addressEnabled = check(bottom, "Utiliser ce dossier", prefs.addressEnabled)
-        // autres dossiers réseau, lus en plus du premier (mêmes identifiants)
+        user = field(bottom, "Utilisateur (laisser vide pour un accès invité)", prefs.user)
+        password = field(bottom, "Mot de passe", prefs.password, secret = true)
+        domain = field(bottom, "Domaine / groupe de travail (généralement vide)", prefs.domain)
+        // autres dossiers réseau, lus en plus du premier, sur le même NAS ou sur un autre
         extraBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         bottom.addView(extraBox)
-        prefs.extraFolders.forEach { addExtraField(it.address, it.enabled) }
+        prefs.extraFolders.forEach { addExtraField(it) }
         bottom.addView(button("+ Ajouter un dossier réseau") {
             // prérempli avec le dossier Photos de la Freebox : il ne reste qu'à compléter
-            addExtraField(NEW_FOLDER_PREFILL, true).apply { setSelection(text.length) }.requestFocus()
+            addExtraField(NetFolder(NEW_FOLDER_PREFILL)).apply { setSelection(text.length) }.requestFocus()
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
             topMargin = dp(8)
         })
         // photos de paysages sous licence libre, en plus ou à la place des dossiers réseau
         webPhotos = check(bottom, "Ajouter des photos de paysages du web (Wikimedia Commons, sous licence libre, avec leur auteur affiché)", prefs.webPhotos)
-        user = field(bottom, "Utilisateur (laisser vide pour un accès invité)", prefs.user)
-        password = field(bottom, "Mot de passe", prefs.password, secret = true)
-        domain = field(bottom, "Domaine / groupe de travail (généralement vide)", prefs.domain)
         recursive = check(bottom, "Inclure les sous-dossiers", prefs.recursive)
         bottom.addView(cycler("Taille du cache sur la TV", listOf(200, 500, 1000, 2000), prefs.cacheMb, { "$it Mo" }) {
             prefs.cacheMb = it
@@ -187,7 +190,9 @@ class SettingsActivity : Activity() {
     private fun save() {
         prefs.address = address.text.toString()
         prefs.addressEnabled = addressEnabled.isChecked
-        prefs.extraFolders = extraFields.map { (edit, box) -> NetFolder(edit.text.toString(), box.isChecked) }
+        prefs.extraFolders = extraFields.map {
+            NetFolder(it.address.text.toString(), it.enabled.isChecked, it.user.text.toString(), it.password.text.toString())
+        }
         prefs.user = user.text.toString()
         prefs.password = password.text.toString()
         prefs.domain = domain.text.toString()
@@ -197,16 +202,19 @@ class SettingsActivity : Activity() {
         prefs.showClock = showClock.isChecked
     }
 
-    /** Un champ pour un dossier réseau de plus, avec sa coche et son bouton pour le retirer. */
-    private fun addExtraField(value: String, enabled: Boolean): EditText {
+    /**
+     * Un bloc pour un dossier réseau de plus : adresse, coche, bouton pour le retirer, et
+     * identifiants propres pour un autre NAS (vides = ceux du premier dossier).
+     */
+    private fun addExtraField(folder: NetFolder): EditText {
         val block = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val edit = field(block, "Autre dossier réseau", value)
+        val edit = field(block, "Autre dossier réseau", folder.address)
         val line = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val box = check(line, "Utiliser ce dossier", enabled)
-        val entry = edit to box
+        val box = check(line, "Utiliser ce dossier", folder.enabled)
+        lateinit var entry: ExtraField
         val remove = button("Retirer ce dossier") {
             val i = extraBox.indexOfChild(block)
             extraFields.remove(entry)
@@ -222,6 +230,9 @@ class SettingsActivity : Activity() {
             marginStart = dp(24)
         })
         block.addView(line)
+        val folderUser = field(block, "Utilisateur de ce dossier (vide = mêmes identifiants que le premier dossier)", folder.user)
+        val folderPassword = field(block, "Mot de passe de ce dossier", folder.password, secret = true)
+        entry = ExtraField(edit, box, folderUser, folderPassword)
         extraBox.addView(block)
         extraFields += entry
         highlightFocus(block)
