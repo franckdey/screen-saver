@@ -1,6 +1,7 @@
 package com.maxime.photodream
 
 import kotlinx.coroutines.CancellationException
+import java.io.File
 import java.security.MessageDigest
 
 /**
@@ -44,6 +45,11 @@ class MultiPhotoSource(private val parts: List<Part>) : PhotoSource {
     override suspend fun readHead(path: String, maxBytes: Int): ByteArray {
         val (part, inner) = route(path)
         return part.source.readHead(inner, maxBytes)
+    }
+
+    override suspend fun download(path: String, dest: File) {
+        val (part, inner) = route(path)
+        part.source.download(inner, dest)
     }
 
     override fun folderLabel(photo: RemotePhoto): String {

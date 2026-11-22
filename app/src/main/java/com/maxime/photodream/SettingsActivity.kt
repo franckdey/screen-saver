@@ -118,6 +118,17 @@ class SettingsActivity : Activity() {
         top.addView(cycler("Flou de l'arrière-plan", listOf(0, 1, 2), prefs.blurLevel, {
             listOf("aucun", "léger", "fort")[it]
         }) { prefs.blurLevel = it })
+        // les vidéos du NAS, lues comme des photos (téléchargées dans le cache de la TV)
+        top.addView(cycler("Vidéos du NAS", listOf(Prefs.VIDEOS_OFF, Prefs.VIDEOS_MUTED, Prefs.VIDEOS_SOUND), prefs.videoMode, {
+            listOf("ne pas les montrer", "les lire sans le son", "les lire avec le son")[it]
+        }) { prefs.videoMode = it })
+        top.addView(cycler("Durée maximale d'une vidéo", listOf(30, 60, 120, 300, 0), prefs.videoMaxSeconds, {
+            when {
+                it == 0 -> "jusqu'au bout"
+                it < 60 -> "$it s"
+                else -> "${it / 60} min"
+            }
+        }) { prefs.videoMaxSeconds = it })
         showFolder = check(top, "Afficher le lieu et la date sur la photo (sinon son dossier et son nom)", prefs.showFolder)
         showClock = check(top, "Afficher l'heure", prefs.showClock)
 

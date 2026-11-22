@@ -27,6 +27,9 @@ class PhotoPlayer(
     var paused = false
         private set
 
+    /** Vrai pendant la lecture d'une vidéo : la photo reste jusqu'à la fin de la vidéo. */
+    var held = false
+
     /** Instant où la photo [index] est apparue, ou -1 tant qu'elle se charge. */
     private var shownAt = -1L
 
@@ -68,7 +71,7 @@ class PhotoPlayer(
 
     /** Avance d'une photo quand son temps est écoulé ; renvoie vrai si la photo a changé. */
     fun update(now: Long): Boolean {
-        if (paused || shownAt < 0 || now - shownAt < intervalMs) return false
+        if (paused || held || shownAt < 0 || now - shownAt < intervalMs) return false
         next()
         return true
     }
@@ -83,6 +86,7 @@ class PhotoPlayer(
             index = wrap(i)
         }
         shownAt = -1L
+        held = false
     }
 
     private fun wrap(i: Int) = ((i % photos.size) + photos.size) % photos.size

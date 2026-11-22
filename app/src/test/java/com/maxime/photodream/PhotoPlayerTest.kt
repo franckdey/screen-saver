@@ -73,6 +73,19 @@ class PhotoPlayerTest {
     }
 
     @Test
+    fun `une video garde la place jusqu'a sa fin`() {
+        val p = PhotoPlayer(listOf(photo("1.mp4"), photo("2")), 0, 5_000)
+        p.shown(0)
+        p.held = true
+        assertFalse(p.update(60_000))
+        // fin de la vidéo : la vue passe à la suivante, qui n'est plus retenue
+        p.next()
+        assertFalse(p.held)
+        p.shown(61_000)
+        assertTrue(p.update(66_000))
+    }
+
+    @Test
     fun `navigation manuelle relance le compte a rebours`() {
         val p = PhotoPlayer(listOf(photo("1"), photo("2"), photo("3")), 0, 5_000)
         p.shown(0)

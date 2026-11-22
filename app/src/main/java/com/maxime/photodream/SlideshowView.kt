@@ -17,6 +17,7 @@ import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.widget.FrameLayout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -36,7 +37,7 @@ import kotlin.math.pow
  * dossier par dossier, une toutes les N secondes, gauche / droite pour reculer ou avancer.
  */
 @SuppressLint("ViewConstructor")
-class SlideshowView(context: Context, private val simple: Boolean = false) : View(context) {
+class SlideshowView(context: Context, private val simple: Boolean = false) : FrameLayout(context) {
 
     private val prefs = Prefs(context)
     private val repo = PhotoRepository(context, prefs)
@@ -154,6 +155,18 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
     /** Photos suivantes trop ressemblantes déjà repoussées pour la photo affichée. */
     private var simpleDeferred = 0
 
+    // --- Vidéos ------------------------------------------------------------------------------
+
+    /** Lecteur posé par-dessus le dessin, à la place de l'image de la vidéo. */
+    private val video = VideoLayer(context, this)
+    private val videoMuted = prefs.videoMode != Prefs.VIDEOS_SOUND
+    private val videoMaxMs = prefs.videoMaxSeconds * 1000
+    /** Vidéo à lire d'après l'image dessinée, et sa place à l'écran (recalculées à chaque image). */
+    private var videoWanted: LoadedPhoto? = null
+    private val videoRect = RectF()
+    /** Vidéo déjà lue jusqu'au bout (ou illisible) : elle reste affichée comme une photo. */
+    private var videoDone: LoadedPhoto? = null
+
     private var status: String? = "Lecture du dossier réseau… (un gros dossier peut prendre un moment)"
     private var notice: String? = null
     private var noticeUntil = 0L
@@ -205,6 +218,7 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
 
     init {
         setBackgroundColor(Color.BLACK)
+        setWillNotDraw(false) // la vue dessine elle-même, la vidéo passe par-dessus
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -250,6 +264,7 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         super.onDetachedFromWindow()
         scope?.cancel()
         scope = null
+        video.stop()
         // la déconnexion SMB fait du réseau : jamais sur le fil principal
         Thread { repo.close() }.start()
     }
@@ -302,10 +317,13 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         // De préférence une vignette visible, pas encore montrée : c'est exactement
         // cette photo-là qui grandira.
         // dossier par dossier, la photo suivante vient de la liste et non d'une vignette au hasard
-        val target = if (prefs.mosaicRandom) candidateTile() else null
+        // en aléatoire, les vidéos (sans vignette tant qu'elles ne sont pas téléchargées) passent aussi
+        val wantVideo = prefs.mosaicRandom && random.nextFloat() < repo.videoShare
+        val target = if (prefs.mosaicRandom && !wantVideo) candidateTile() else null
         nextTarget = target
         s.launch {
-            val photo = target?.photo?.let { repo.loadPhoto(it, blurLevel) } ?: run {
+            val photo = (if (wantVideo) repo.nextPhoto(blurLevel, videoOnly = true) else null)
+                ?: target?.photo?.let { repo.loadPhoto(it, blurLevel) } ?: run {
                 nextTarget = null
                 repo.nextPhoto(blurLevel)
             }
@@ -398,7 +416,8 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
     /** Zoome ×2 au centre de la photo affichée et arrête le diaporama. Faux s'il n'y a rien à zoomer. */
     private fun startZoom(): Boolean {
         val now = SystemClock.uptimeMillis()
-        val target = zoomTarget(now) ?: return false
+        // pas de zoom dans une vidéo
+        val target = zoomTarget(now)?.takeIf { it.video == null } ?: return false
         val bmp = target.full
         // on part de la taille à laquelle la photo était dessinée (avec sa marge dans la mosaïque)
         val start = if (simple) 1f else 0.95f
@@ -508,6 +527,7 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
             }
             notice = null
             viewer = loaded
+            videoDone = null
             viewerTile = tile
             viewerFrom = 0f
             viewerStart = SystemClock.uptimeMillis()
@@ -633,6 +653,7 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         val now = SystemClock.uptimeMillis()
         simpleFading = simpleShown
         simpleShown = photo
+        videoDone = null
         simpleFadeStart = now
         simpleEffect = simpleTransition.resolve(simpleEffect)
         simpleFailures = 0
@@ -784,6 +805,7 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         val dt = if (lastFrame == 0L) 0L else (now - lastFrame).coerceAtMost(100)
         lastFrame = now
         canvas.drawColor(Color.BLACK)
+        videoWanted = null
 
         val z = zoom
         // sans appui pendant un moment, le zoom s'arrête et le diaporama reprend
@@ -793,6 +815,8 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
             drawZoom(canvas, z, dt)
         } else if (simple) {
             if (f != null) {
+                // une vidéo reste à l'écran jusqu'à sa fin
+                f.held = simpleShown?.let { it.video != null && it !== videoDone && it.photo == f.current } == true
                 if (f.update(now)) {
                     simpleForward = true
                     simpleEnsure()
@@ -813,6 +837,7 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
             drawPhoto(canvas, viewer, viewerTile)
         } else if (tiles.isNotEmpty()) {
             move(dt, now)
+            timeline.held = current?.let { it.video != null && it !== videoDone } == true
             updatePhase(now)
             val zoom = drawPhotoParams(now)
             drawMosaic(canvas, now)
@@ -820,8 +845,46 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), dimPaint)
             drawPhoto(canvas, current, currentTile)
         }
-        drawOverlays(canvas, now)
+        syncVideo()
         postInvalidateOnAnimation()
+    }
+
+    /** Après les enfants (la vidéo) : la légende de la vidéo et les textes passent par-dessus. */
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        val now = SystemClock.uptimeMillis()
+        if (zoom == null) {
+            val f = player
+            if (simple && f != null) drawSimpleText(canvas, f, now)
+            else videoWanted?.let { drawPhotoLabel(canvas, it.label, videoRect, 1f) }
+        }
+        drawOverlays(canvas, now)
+    }
+
+    /** Lance, arrête ou met en pause la vidéo selon ce qui vient d'être dessiné. */
+    private fun syncVideo() {
+        val want = videoWanted
+        if (want == null) {
+            if (video.playing != null) video.stop()
+            return
+        }
+        if (video.playing !== want) video.start(want, videoRect, videoMuted, videoMaxMs, ::videoEnded)
+        video.setPaused(if (simple) player?.paused == true else !selecting && timeline.paused)
+        video.tick()
+    }
+
+    /** Vidéo terminée : on passe à la suite ; illisible : elle reste le temps d'une photo. */
+    private fun videoEnded(photo: LoadedPhoto, error: Boolean) {
+        videoDone = photo
+        if (error) {
+            showNotice("Vidéo illisible sur cet appareil" + (photo.photo?.let { " : " + it.path.substringAfterLast('\\') } ?: ""), 5_000)
+            return
+        }
+        when {
+            simple -> if (simpleShown === photo) skip()
+            selecting -> if (viewer === photo) closeViewer()
+            current === photo -> timeline.skip()
+        }
     }
 
     private fun updatePhase(now: Long) {
@@ -843,6 +906,7 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
                         while (recentTiles.size > 4) recentTiles.removeFirst()
                     }
                     current = ready
+                    videoDone = null
                     currentTile = tile
                     if (photo != null) history.show(photo, nextIndex)
                     nextIndex = -1
@@ -969,7 +1033,8 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         lerp(clipRect, tileRect, fitRect, fgZoom)
 
         // Léger zoom lent (effet « Ken Burns ») pendant l'affichage plein écran.
-        val k = 1f + 0.06f * fgKenBurns * fgZoom
+        val isVideo = photo.video != null
+        val k = if (isVideo) 1f else 1f + 0.06f * fgKenBurns * fgZoom
         centered(photoRect, clipRect.centerX(), clipRect.centerY(), photoRect.width() * k, photoRect.height() * k)
 
         // La photo garde l'inclinaison de sa vignette et se redresse en grandissant.
@@ -1000,14 +1065,24 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
         bitmapPaint.alpha = 255
         canvas.restore()
 
-        if (prefs.showFolder && photo.label.isNotEmpty() && fgZoom > 0f) {
-            // Nom du dossier en bas de la photo, sur un léger dégradé sombre pour rester lisible
-            val alpha = fgZoom.pow(3)
+        // en plein écran, la vidéo se lit par-dessus l'image : sa légende est dessinée après elle
+        val playVideo = isVideo && photo !== videoDone && fgZoom >= 0.999f && fgAlpha >= 1f
+        if (playVideo) {
+            videoWanted = photo
+            videoRect.set(clipRect)
+        }
+        if (!playVideo && fgZoom > 0f) drawPhotoLabel(canvas, photo.label, clipRect, fgZoom.pow(3))
+        canvas.restore()
+    }
+
+    /** Nom du dossier (ou lieu et date) en bas de la photo, sur un léger dégradé sombre pour rester lisible. */
+    private fun drawPhotoLabel(canvas: Canvas, label: String, clipRect: RectF, alpha: Float) {
+        if (prefs.showFolder && label.isNotEmpty()) {
             val size = labelSize
             val normal = textPaint.textSize
             textPaint.textSize = size
             // trop longue pour la largeur de la photo : sur deux lignes
-            val lines = TextWrap.wrap(photo.label, clipRect.width() - size * 1.8f, textPaint::measureText)
+            val lines = TextWrap.wrap(label, clipRect.width() - size * 1.8f, textPaint::measureText)
             val lineH = size * 1.3f
             val scrimH = min(clipRect.height() * 0.45f, size * 6f + lineH * (lines.size - 1))
             scrimPaint.shader = LinearGradient(
@@ -1022,7 +1097,6 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
             }
             textPaint.textSize = normal
         }
-        canvas.restore()
     }
 
     /** Diaporama simple : la photo entière en plein écran, en fondu enchaîné avec la précédente. */
@@ -1037,6 +1111,17 @@ class SlideshowView(context: Context, private val simple: Boolean = false) : Vie
             return
         }
         drawFitted(canvas, shown.full, if (simpleFading == null) Layer() else newLayer)
+        // une fois l'effet de passage fini, la vidéo se lit exactement à la place de son image
+        if (simpleFading == null && shown.video != null && shown !== videoDone && shown.photo == f.current) {
+            videoWanted = shown
+            videoRect.set(photoRect)
+        }
+    }
+
+    /** Légende et position dans la liste du diaporama simple, dessinées par-dessus une vidéo. */
+    private fun drawSimpleText(canvas: Canvas, f: PhotoPlayer, now: Long) {
+        val shown = simpleShown ?: return
+        val fade = if (simpleFading == null) 1f else ((now - simpleFadeStart) / simpleEffect.durationMs.toFloat()).coerceIn(0f, 1f)
         // légende (lieu et date, ou dossier et nom) et position dans la liste
         val size = labelSize
         val normal = textPaint.textSize
