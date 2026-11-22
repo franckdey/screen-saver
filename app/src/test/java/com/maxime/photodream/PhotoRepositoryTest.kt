@@ -113,6 +113,52 @@ class PhotoRepositoryTest {
     }
 
     @Test
+    fun `videos ignorees tant que le reglage est coupe`() = runTest {
+        prefs.videoMode = Prefs.VIDEOS_OFF
+        val r = repo(FakeSource(photos(2) + ("Vacances\\film.mp4" to ByteArray(10))))
+        r.load()
+        assertEquals(0f, r.videoShare)
+    }
+
+    @Test
+    fun `video trop grosse pour le cache sautee sans etre telechargee`() = runTest {
+        prefs.videoMode = Prefs.VIDEOS_MUTED
+        prefs.cacheMb = 200
+        val big = RemotePhoto("Vacances\\gros.mp4", 150L * 1024 * 1024, 1L)
+        val downloads = mutableListOf<String>()
+        val source = object : PhotoSource {
+            override suspend fun listPhotos(recursive: Boolean, limit: Int) = listOf(big)
+            override suspend fun read(path: String): ByteArray = error("pas de lecture en mémoire")
+            override suspend fun download(path: String, dest: File) { downloads += path }
+            override fun folderLabel(photo: RemotePhoto) = ""
+            override fun close() {}
+        }
+        val r = repo(source)
+        r.load()
+        assertEquals(1f, r.videoShare)
+        assertNull(r.nextPhoto(0, videoOnly = true))
+        assertTrue(r.lastError!!, r.lastError!!.startsWith("Vidéo trop grosse pour le cache"))
+        assertTrue(downloads.isEmpty())
+    }
+
+    @Test
+    fun `video illisible sautee, les photos continuent, sans vignette pour elle`() = runTest {
+        prefs.videoMode = Prefs.VIDEOS_MUTED
+        val source = FakeSource(photos(2) + ("Vacances\\film.mp4" to "pas une vidéo".toByteArray()))
+        val r = repo(source)
+        r.load()
+        assertEquals(1f / 3, r.videoShare, 0.001f)
+        // une vidéo jamais téléchargée n'est pas téléchargée pour une simple vignette
+        repeat(4) { assertNotNull(r.nextTile(0)) }
+        assertNull(source.reads["Vacances\\film.mp4"])
+        assertNull(r.nextPhoto(0, videoOnly = true))
+        assertEquals("Vidéo non lisible par l'appareil : film.mp4", r.lastError)
+        repeat(2) { assertNotNull(r.nextPhoto(0)) }
+        // rien ne reste dans le cache pour la vidéo illisible
+        assertTrue(cacheDir.listFiles().orEmpty().none { it.name.endsWith(".vid") || it.name.endsWith(".tmp") })
+    }
+
+    @Test
     fun `fichier abime saute sans bloquer le diaporama`() = runTest {
         val files = photos(2) + ("Vacances\\abime.jpg" to "pas une photo".toByteArray())
         val r = repo(FakeSource(files))

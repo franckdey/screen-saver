@@ -183,8 +183,26 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("showClock", false)
         set(v) = sp.edit().putBoolean("showClock", v).apply()
 
+    /** Vidéos du NAS : [VIDEOS_OFF] (pas de vidéo), [VIDEOS_MUTED] (lues sans le son) ou [VIDEOS_SOUND]. */
+    var videoMode: Int
+        get() = sp.getInt("videoMode", VIDEOS_OFF)
+        set(v) = sp.edit().putInt("videoMode", v).apply()
+
+    val videos: Boolean get() = videoMode != VIDEOS_OFF
+
+    /** Durée maximale de lecture d'une vidéo, en secondes ; 0 = jusqu'au bout. */
+    var videoMaxSeconds: Int
+        get() = sp.getInt("videoMax", 60)
+        set(v) = sp.edit().putInt("videoMax", v).apply()
+
     /** Taille maximale du cache local de photos, en Mo. */
     var cacheMb: Int
         get() = sp.getInt("cacheMb", 500)
         set(v) = sp.edit().putInt("cacheMb", v).apply()
+
+    companion object {
+        const val VIDEOS_OFF = 0
+        const val VIDEOS_MUTED = 1
+        const val VIDEOS_SOUND = 2
+    }
 }

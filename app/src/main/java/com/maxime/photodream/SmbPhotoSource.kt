@@ -14,10 +14,13 @@ import com.hierynomus.smbj.connection.Connection
 import com.hierynomus.smbj.session.Session
 import com.hierynomus.smbj.share.DiskShare
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
@@ -56,6 +59,8 @@ class SmbPhotoSource(
     private val onCompat: () -> Unit = {},
     /** Faux pour le diagnostic, qui veut tester chaque mode séparément. */
     private val autoCompat: Boolean = true,
+    /** Lister aussi les vidéos (réglage « Vidéos du NAS »). */
+    private val videos: Boolean = false,
 ) : PhotoSource {
 
     /** Vrai en mode compatible : SMB 2.0/2.1 seulement, sans chiffrement ni signature imposée. */
@@ -137,7 +142,7 @@ class SmbPhotoSource(
                 val isDir = info.fileAttributes and FileAttributes.FILE_ATTRIBUTE_DIRECTORY.value != 0L
                 if (isDir) {
                     if (recursive && depth < 15) walk(path, depth + 1)
-                } else if (isImage(name, sdkInt)) {
+                } else if (isImage(name, sdkInt) || (videos && Videos.isVideo(name))) {
                     out += RemotePhoto(path, info.endOfFile, info.lastWriteTime.toEpochMillis())
                 }
             }
@@ -196,6 +201,36 @@ class SmbPhotoSource(
             }
             if (offset < size) throw IOException("Fichier incomplet : $offset octets sur $size")
             out.toByteArray()
+        }
+    }
+
+    /**
+     * Copie un gros fichier (une vidéo) dans [dest] par blocs, sans le garder en mémoire.
+     * S'arrête si le diaporama se ferme entre-temps.
+     */
+    override suspend fun download(path: String, dest: File) {
+        val job = currentCoroutineContext()[Job]
+        withShare { disk ->
+            disk.openFile(
+                path, EnumSet.of(AccessMask.GENERIC_READ), null, SMB2ShareAccess.ALL,
+                SMB2CreateDisposition.FILE_OPEN, null,
+            ).use { file ->
+                // comme pour les photos : jamais de lecture demandée au-delà de la fin du fichier
+                val size = file.fileInformation.standardInformation.endOfFile
+                dest.outputStream().use { out ->
+                    val buffer = ByteArray(READ_CHUNK)
+                    var offset = 0L
+                    while (offset < size) {
+                        if (job?.isActive == false) throw CancellationException("Diaporama fermé")
+                        val wanted = minOf(READ_CHUNK.toLong(), size - offset).toInt()
+                        val n = file.read(buffer, offset, 0, wanted)
+                        if (n <= 0) break
+                        out.write(buffer, 0, n)
+                        offset += n
+                    }
+                    if (offset < size) throw IOException("Fichier incomplet : $offset octets sur $size")
+                }
+            }
         }
     }
 

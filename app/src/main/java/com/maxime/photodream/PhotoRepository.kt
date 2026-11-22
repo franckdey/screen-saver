@@ -17,6 +17,8 @@ class LoadedPhoto(
     val photo: RemotePhoto? = null,
     /** Empreinte de couleurs (voir [Variety]), pour ne pas enchaîner deux photos presque pareilles. */
     val print: FloatArray? = null,
+    /** Pour une vidéo : le fichier à lire ([full] est alors une image tirée de la vidéo). */
+    val video: File? = null,
 )
 
 /** Vignette de la mosaïque et la photo dont elle vient (pour l'agrandir ensuite). */
@@ -105,6 +107,7 @@ class PhotoRepository(
             queue.clear()
             tileQueue.clear()
         }
+        videoShare = shareOfVideos(photos)
         photos.size
     }
 
@@ -134,6 +137,7 @@ class PhotoRepository(
     @Synchronized
     private fun replacePhotos(list: List<RemotePhoto>) {
         photos = list
+        videoShare = shareOfVideos(list)
         // garde l'ordre en cours pour les photos toujours présentes, ajoute les nouvelles
         val present = list.toHashSet()
         val kept = queue.filter { it in present }
@@ -145,7 +149,8 @@ class PhotoRepository(
     }
 
     /** Clé du dossier réglé : une autre adresse ou un autre choix de sous-dossiers invalide la liste. */
-    private fun listingKey() = "${prefs.allAddresses.joinToString(";")}|${prefs.recursive}|${if (prefs.webPhotos) "web" else ""}"
+    private fun listingKey() = "${prefs.allAddresses.joinToString(";")}|${prefs.recursive}|${if (prefs.webPhotos) "web" else ""}" +
+        if (prefs.videos) "|videos" else ""
 
     private fun saveListing(list: List<RemotePhoto>) {
         if (list.isEmpty()) return
@@ -178,11 +183,14 @@ class PhotoRepository(
         null
     }
 
-    /** Photo suivante (ordre aléatoire, sans répétition avant d'avoir tout vu). */
-    suspend fun nextPhoto(blurLevel: Int): LoadedPhoto? = withContext(Dispatchers.IO) {
+    /**
+     * Photo suivante (ordre aléatoire, sans répétition avant d'avoir tout vu).
+     * Avec [videoOnly], la prochaine vidéo pas encore vue de la file, ou null s'il n'y en a pas.
+     */
+    suspend fun nextPhoto(blurLevel: Int, videoOnly: Boolean = false): LoadedPhoto? = withContext(Dispatchers.IO) {
         var deferred = 0
         repeat(MAX_ATTEMPTS) {
-            val photo = nextRemote() ?: return@withContext null
+            val photo = (if (videoOnly) nextVideoRemote() else nextRemote()) ?: return@withContext null
             // en aléatoire, une photo aux couleurs presque pareilles à la précédente attend un peu
             var tooClose = false
             val reject: ((FloatArray) -> Boolean)? = if (prefs.mosaicRandom && deferred < MAX_DEFERRED) {
@@ -190,7 +198,7 @@ class PhotoRepository(
             } else {
                 null
             }
-            val loaded = load(photo, blurLevel, reject = reject)
+            val loaded = load(photo, blurLevel, reject = reject.takeIf { !videoOnly })
             if (loaded == null && tooClose) {
                 deferred++
                 defer(photo)
@@ -203,6 +211,10 @@ class PhotoRepository(
         }
         null
     }
+
+    /** Part des vidéos dans la liste (0 sans vidéo) : la mosaïque en tire autant au hasard. */
+    @Volatile var videoShare = 0f
+        private set
 
     /** Empreinte de la dernière photo montrée en grand dans la mosaïque. */
     @Volatile private var lastPrint: FloatArray? = null
@@ -294,7 +306,9 @@ class PhotoRepository(
         }
         val label = caption(photo, file)
         markSeen(photo)
-        return LoadedPhoto(full, if (withTile) Images.makeTile(full, blurLevel) else full, label, photo, print)
+        // une vidéo déjà téléchargée se lit même hors ligne
+        val video = videoFile(file).takeIf { prefs.videos && it.exists() }?.also { it.setLastModified(System.currentTimeMillis()) }
+        return LoadedPhoto(full, if (withTile) Images.makeTile(full, blurLevel) else full, label, photo, print, video)
     }
 
     /** Vrai si la photo a déjà été montrée en grand pendant ce tour. */
@@ -343,11 +357,30 @@ class PhotoRepository(
         if (photos.isEmpty()) return null
         if (tileQueue.isEmpty()) {
             val seenNow = seenSet()
-            val (fresh, old) = photos.partition { it.path !in seenNow }
+            // une vidéo n'a de vignette qu'une fois téléchargée : on ne la télécharge pas pour une vignette
+            val usable = photos.filter { !Videos.isVideo(it.path) || isCached(it) }
+            val (fresh, old) = usable.partition { it.path !in seenNow }
             tileQueue.addAll(fresh.shuffled())
             tileQueue.addAll(old.shuffled())
         }
-        return tileQueue.removeFirst()
+        return tileQueue.removeFirstOrNull()
+    }
+
+    /** Prochaine vidéo pas encore vue de la file des photos en grand. */
+    @Synchronized
+    private fun nextVideoRemote(): RemotePhoto? {
+        if (photos.isEmpty()) return null
+        if (queue.isEmpty()) nextRemote()?.let { queue.addFirst(it) }
+        val seenNow = seenSet()
+        val video = queue.firstOrNull { Videos.isVideo(it.path) && it.path !in seenNow } ?: return null
+        queue.remove(video)
+        return video
+    }
+
+    private fun isCached(photo: RemotePhoto): Boolean {
+        if (photo.path.startsWith(CACHE_PREFIX)) return true
+        val file = File(cacheDir, key(photo) + ".jpg")
+        return file.exists() && (!Videos.isVideo(photo.path) || videoFile(file).exists())
     }
 
     @Synchronized
@@ -379,12 +412,14 @@ class PhotoRepository(
             return File(cacheDir, photo.path.removePrefix(CACHE_PREFIX)).takeIf { it.exists() }
         }
         val file = File(cacheDir, key(photo) + ".jpg")
-        if (file.exists()) {
+        val isVideo = Videos.isVideo(photo.path)
+        if (file.exists() && (!isVideo || videoFile(file).exists())) {
             file.setLastModified(System.currentTimeMillis())
             return file
         }
         val src = source ?: return null
         return try {
+            if (isVideo) return downloadVideo(src, photo, file)
             val bytes = src.read(photo.path)
             if (bytes.isEmpty()) {
                 lastError = "Fichier vide : ${name(photo)}"
@@ -414,15 +449,60 @@ class PhotoRepository(
         }
     }
 
+    /**
+     * Télécharge une vidéo en entier dans le cache, puis en tire l'image affichée en attendant
+     * sa lecture (et dans la mosaïque). Renvoie cette image, ou null si la vidéo est trop
+     * grosse ou illisible.
+     */
+    private suspend fun downloadVideo(src: PhotoSource, photo: RemotePhoto, file: File): File? {
+        val max = Videos.maxBytes(prefs.cacheMb)
+        if (photo.size > max) {
+            lastError = "Vidéo trop grosse pour le cache (${photo.size / MB} Mo, ${max / MB} Mo au plus) : ${name(photo)}"
+            return null
+        }
+        val video = videoFile(file)
+        val tmp = File(video.path + ".tmp")
+        try {
+            src.download(photo.path, tmp)
+            if (tmp.length() == 0L) {
+                lastError = "Fichier vide : ${name(photo)}"
+                return null
+            }
+            if (!tmp.renameTo(video)) return null
+        } finally {
+            tmp.delete()
+        }
+        val meta = Videos.thumbnail(video, file)
+        if (meta == null) {
+            video.delete()
+            file.delete()
+            lastError = "Vidéo non lisible par l'appareil : ${name(photo)}"
+            return null
+        }
+        writeMeta(file, meta)
+        // une vidéo prend la place de nombreuses photos : on fait de la place tout de suite
+        downloadsSinceTrim = 0
+        trimCache(keep = file)
+        return file
+    }
+
+    private fun shareOfVideos(list: List<RemotePhoto>): Float =
+        if (list.isEmpty() || !prefs.videos) 0f else list.count { Videos.isVideo(it.path) }.toFloat() / list.size
+
+    /** La vidéo dont [jpg] est l'image, à côté d'elle dans le cache. */
+    private fun videoFile(jpg: File) = File(jpg.path.removeSuffix(".jpg") + ".vid")
+
     /** Supprime les photos les moins récemment vues quand le cache dépasse la taille choisie. */
     @Synchronized
     private fun trimCache(keep: File) {
         val files = cacheDir.listFiles().orEmpty().sortedBy { it.lastModified() }
         var total = files.sumOf { it.length() }
         val max = prefs.cacheMb * 1024L * 1024L
+        val kept = keep.nameWithoutExtension
         for (f in files) {
             if (total <= max) break
-            if (f == keep) continue // la photo qu'on vient de télécharger va être affichée
+            // la photo (ou la vidéo et son image) qu'on vient de télécharger va être affichée
+            if (f.nameWithoutExtension == kept) continue
             total -= f.length()
             f.delete()
         }
@@ -538,6 +618,7 @@ class PhotoRepository(
                 location, login.user, login.password, login.domain,
                 compat = prefs.smbCompat,
                 onCompat = { prefs.smbCompat = true },
+                videos = prefs.videos,
             )
         }
 
@@ -549,6 +630,7 @@ class PhotoRepository(
         private const val MAX_DEFERRED = 3
         /** De combien de places une photo trop ressemblante recule dans la file. */
         private const val DEFER_BY = 10
+        private const val MB = 1024L * 1024L
         /** L'EXIF est au début du fichier : 256 Ko suffisent largement. */
         private const val EXIF_HEAD = 256 * 1024
     }

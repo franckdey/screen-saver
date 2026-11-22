@@ -82,7 +82,8 @@ object Images {
         return result
     }
 
-    private fun writeJpeg(bmp: Bitmap, out: File): Boolean {
+    /** Écrit [bmp] en JPEG dans [out] (sans laisser de fichier à moitié écrit) et libère [bmp]. */
+    fun writeJpeg(bmp: Bitmap, out: File): Boolean {
         val tmp = File(out.parentFile, out.name + ".tmp")
         val ok = tmp.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
         bmp.recycle()

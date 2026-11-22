@@ -311,6 +311,26 @@ Chaque pull request lance le workflow **Tests** (`.github/workflows/tests.yml`) 
 En local : `./gradlew testDebugUnitTest` (les tests Samba sont ignorés sans la variable
 `SMB_TEST_HOST`).
 
+### Vidéos du NAS
+
+Le réglage **« Vidéos du NAS »** (partie Diaporama) ajoute les vidéos des dossiers réseau
+(`.mp4`, `.mov`, `.m4v`, `.mkv`, `.webm`, `.3gp`) au diaporama, mélangées aux photos :
+**sans le son** ou **avec le son**. Il est coupé par défaut.
+
+- Une vidéo s'affiche comme une photo (même cadre, même effet de passage), puis se lit à sa
+  place. Le diaporama attend la fin de la vidéo, ou la **durée maximale** choisie (30 s, 1 min
+  par défaut, 2 min, 5 min ou jusqu'au bout).
+- OK met la vidéo en pause, flèche droite passe à la suite. Pas de zoom dans une vidéo.
+- Elle est d'abord téléchargée en entier dans le cache de la TV, pendant que la photo
+  précédente est affichée. Une vidéo plus grosse que la moitié du cache (250 Mo avec le cache
+  de 500 Mo) est sautée : agrandir le cache dans « Dossier réseau et tests » si besoin.
+- La légende reprend le lieu et la date enregistrés par le téléphone.
+- Dans la mosaïque, une vidéo n'a de vignette qu'après avoir été montrée une fois (pour ne
+  pas télécharger des vidéos entières juste pour des vignettes).
+- Une vidéo que la TV ne sait pas lire reste affichée quelques secondes comme une photo.
+
+Changer ce réglage relit le dossier au lancement suivant.
+
 ---
 
 ## Organisation du code
@@ -326,6 +346,8 @@ En local : `./gradlew testDebugUnitTest` (les tests Samba sont ignorés sans la 
 - `WikimediaSource.kt` : les photos de paysages de Wikimedia Commons, avec auteur et licence.
 - `Updater.kt`, `ApkInstaller.kt` : mise à jour intégrée (vérification sur GitHub,
   téléchargement, installation).
+- `Videos.kt`, `VideoLayer.kt` : les vidéos (image tirée de la vidéo, date et lieu, lecture
+  par-dessus le diaporama).
 - `Variety.kt` : pour que deux photos voisines soient différentes (groupe et couleurs, testé).
 - `PhotoRepository.kt`, `Images.kt` : ordre aléatoire, téléchargement, cache, réduction,
   rotation EXIF et flou des vignettes.

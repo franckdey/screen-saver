@@ -50,6 +50,35 @@ class TimelineTest {
     }
 
     @Test
+    fun `une video reste en plein ecran jusqu'a sa fin`() {
+        startPhoto()
+        advance(FADE_MS)
+        advance(ZOOM_MS)
+        assertEquals(Phase.HOLD, timeline.phase)
+        timeline.held = true
+        advance(hold * 10)
+        assertEquals(Phase.HOLD, timeline.phase)
+        // fin de la vidéo : la vue demande la suite
+        timeline.skip()
+        advance(16)
+        assertEquals(Phase.ZOOM_OUT, timeline.phase)
+    }
+
+    @Test
+    fun `video illisible, elle part apres le reste de la duree normale`() {
+        startPhoto()
+        advance(FADE_MS)
+        advance(ZOOM_MS)
+        timeline.held = true
+        advance(hold * 3)
+        timeline.held = false
+        advance(hold / 2 - 32)
+        assertEquals(Phase.HOLD, timeline.phase)
+        advance(64)
+        assertEquals(Phase.ZOOM_OUT, timeline.phase)
+    }
+
+    @Test
     fun `aucune photo ne part tant que rien n'est charge`() {
         val events = advance(5_000, nextReady = false, loading = true)
         assertTrue(events.isEmpty())

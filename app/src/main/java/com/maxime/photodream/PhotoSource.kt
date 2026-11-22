@@ -1,6 +1,7 @@
 package com.maxime.photodream
 
 import java.io.Closeable
+import java.io.File
 
 /** D'où viennent les photos (aujourd'hui un partage SMB ; une fausse source dans les tests). */
 interface PhotoSource : Closeable {
@@ -10,6 +11,11 @@ interface PhotoSource : Closeable {
 
     /** Début du fichier seulement (pour lire l'EXIF sans tout télécharger). */
     suspend fun readHead(path: String, maxBytes: Int): ByteArray = read(path)
+
+    /** Copie le fichier dans [dest] sans le garder en mémoire (les vidéos sont trop grosses pour ça). */
+    suspend fun download(path: String, dest: File) {
+        dest.writeBytes(read(path))
+    }
 
     /** Nom du dossier de la photo, tel qu'on l'affiche sous la photo. */
     fun folderLabel(photo: RemotePhoto): String

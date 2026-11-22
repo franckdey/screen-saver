@@ -37,6 +37,9 @@ class Timeline(private val holdMs: Long) {
     private var pausedAt = 0L
     private var skipRequested = false
 
+    /** Vrai pendant la lecture d'une vidéo : la photo reste en plein écran jusqu'à la fin de la vidéo. */
+    var held = false
+
     /** Fixe la photo (ou la prochaine) en plein écran, ou relance le défilement. */
     fun togglePause(now: Long) {
         paused = !paused
@@ -93,7 +96,8 @@ class Timeline(private val holdMs: Long) {
                     go(Phase.ZOOM_OUT, now)
                 }
                 // photo fixée : le temps d'affichage reste bloqué à mi-parcours
-                paused -> phaseStart = now - min(elapsed, holdMs / 2)
+                // vidéo en cours : pareil, jusqu'à ce qu'elle se termine (skip) ou s'arrête sur une erreur
+                paused || held -> phaseStart = now - min(elapsed, holdMs / 2)
                 elapsed >= holdMs -> go(Phase.ZOOM_OUT, now)
             }
             Phase.ZOOM_OUT -> if (elapsed >= ZOOM_MS) go(Phase.FADE_OUT, now)
